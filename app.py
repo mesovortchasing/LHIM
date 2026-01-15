@@ -9,7 +9,7 @@ from streamlit_folium import st_folium
 
 def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     """
-    Calculates Wind, Rain, Wind Direction, and IR Weight for SIMUSAT.
+    Enhanced Physics: Wind, Rain-Coupled IR, and Spiral Banding.
     """
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow = p
     
@@ -40,10 +40,21 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     total_wind = (v_sym * shear_effect) + v_forward
     if lat > 30.25: total_wind *= 0.85 
     
-    # 4. SIMUSAT IR WEIGHT
-    off_x, off_y = (shear_mag/8) * np.cos(shear_rad), (shear_mag/8) * np.sin(shear_rad)
+    # 4. SIMUSAT FLUID IR WEIGHT (Spiral Bands + Rain Rate)
+    # Adding a logarithmic spiral factor for banding
+    spiral = np.sin(r / 12.0 - angle * 2.5) # The "Fluid" band logic
+    band_noise = max(0, spiral * 0.4)
+    
+    # Shift canopy downshear (Outflow tilt)
+    off_x, off_y = (shear_mag/5) * np.cos(shear_rad), (shear_mag/5) * np.sin(shear_rad)
     r_sat = np.sqrt((dx - off_x)**2 + (dy - off_y)**2)
-    ir_weight = np.exp(-r_sat / (r_max * 4.5)) * (rh / 100)
+    
+    # Base cloud + banding + RH factor
+    ir_weight = np.exp(-r_sat / (r_max * 6.0)) * (rh / 100) * (0.7 + band_noise)
+    
+    # Rain Rate Coupling: Coldest tops (Red/Cyan) where wind is highest
+    rain_coupling = (total_wind / 120) * np.exp(-r / (r_max * 2))
+    ir_weight = min(1.0, ir_weight + rain_coupling)
     
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_weight
 
@@ -68,7 +79,9 @@ st.markdown("""
         <i style="background:yellow"></i> Moderate (50-75)<br>
         <i style="background:blue"></i> TS Force (34-50)<br>
         <hr>
-        <b>Symbols:</b> Arrows show wind flow. <br>Circle size = Wind Magnitude.
+        <b>SIMUSAT:</b><br>
+        <span style="color:red">●</span> Deep Convection<br>
+        <span style="color:cyan">●</span> Heavy Rain Rates<br>
     </div>
     """, unsafe_allow_html=True)
 
@@ -76,56 +89,53 @@ st.title("🌀 Mobile County Interactive Chaser Model (Alpha V4)")
 
 with st.sidebar:
     st.header("1. Environmental Factors")
-    rh = st.slider("Mid-Level Humidity (%)", 30, 100, 80)
-    outflow = st.slider("Outflow Efficiency", 0.0, 1.0, 0.7)
+    rh = st.slider("Mid-Level Humidity (%)", 30, 100, 85)
+    outflow = st.slider("Outflow Efficiency", 0.0, 1.0, 0.8)
     
     st.header("2. Core Parameters")
-    v_max = st.slider("Intensity (kts)", 40, 160, 95)
+    v_max = st.slider("Intensity (kts)", 40, 160, 110)
     f_speed = st.slider("Forward Speed (mph)", 2, 40, 12)
     f_dir = st.slider("Storm Heading (Deg)", 0, 360, 330)
-    r_max = st.slider("RMW (miles)", 10, 60, 25)
+    r_max = st.slider("RMW (miles)", 10, 60, 30)
     
     st.header("3. Upper Level Shear")
-    shear_mag = st.slider("Shear Magnitude (kts)", 0, 60, 15)
-    shear_dir = st.slider("Shear Direction (From)", 0, 360, 270)
+    shear_mag = st.slider("Shear Magnitude (kts)", 0, 60, 12)
+    shear_dir = st.slider("Shear Direction (From)", 0, 360, 260)
     
     st.header("4. Display Settings")
-    show_ir = st.checkbox("Toggle SIMUSAT (Smooth IR)", value=True)
+    show_ir = st.checkbox("Toggle SIMUSAT (Fluid IR)", value=True)
     show_barbs = st.checkbox("Show Wind Flow Vectors", value=True)
     l_lat = st.number_input("Landfall Lat", value=30.35)
     l_lon = st.number_input("Landfall Lon", value=-88.15)
     
     st.header("5. Misc")
-    map_theme = st.select_slider(
-        "Map Theme",
-        options=["Dark Mode", "Light Mode"],
-        value="Dark Mode",
-        help="🌙 Dark Mode uses high-contrast satellite colors. ☀️ Light Mode uses standard street maps."
-    )
-    # Visual cues for the theme slider
-    if map_theme == "Light Mode":
-        st.caption("☀️ Sun Mode Active")
-    else:
-        st.caption("🌙 Moon Mode Active")
-        
+    map_theme = st.select_slider("Map Theme", options=["Dark Mode", "Light Mode"], value="Dark Mode")
     show_circles = st.checkbox("Show Wind Circles", value=True)
 
 # --- 3. COMPUTATION ---
 p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow]
 surge_res = calculate_bay_surge(v_max, l_lon)
 
-grid_n = 35 if show_ir else 20
-lats = np.linspace(29.6, 31.4, grid_n)
-lons = np.linspace(-88.9, -87.3, grid_n)
-results = []
-sat_data = []
+# Expanded satellite grid (2x larger than wind box to avoid "boxed in" look)
+sat_lats = np.linspace(28.5, 32.5, 45)
+sat_lons = np.linspace(-90.5, -86.5, 45)
 
-for lt in lats:
-    for ln in lons:
-        w, w_dir, ir_w = calculate_full_physics(lt, ln, l_lat, l_lon, p)
-        results.append([lt, ln, w, w_dir])
+# Original wind grid for the Mobile region
+wind_lats = np.linspace(29.6, 31.4, 25)
+wind_lons = np.linspace(-88.9, -87.3, 25)
+
+sat_data = []
+for lt in sat_lats:
+    for ln in sat_lons:
+        _, _, ir_w = calculate_full_physics(lt, ln, l_lat, l_lon, p)
         if ir_w > 0.1:
             sat_data.append([lt, ln, ir_w])
+
+results = []
+for lt in wind_lats:
+    for ln in wind_lons:
+        w, w_dir, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
+        results.append([lt, ln, w, w_dir])
 
 df = pd.DataFrame(results, columns=['lat', 'lon', 'wind', 'dir'])
 
@@ -133,41 +143,29 @@ df = pd.DataFrame(results, columns=['lat', 'lon', 'wind', 'dir'])
 c1, c2 = st.columns([4, 1])
 
 with c1:
-    # Set tile based on Misc toggle
     tileset = "CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap"
-    
     m = folium.Map(location=[30.5, -88.1], zoom_start=9, tiles=tileset)
     
-    # 1. SIMUSAT (Smooth IR Satellite)
+    # 1. SIMUSAT (Fluid IR Satellite)
     if show_ir and len(sat_data) > 0:
-        HeatMap(sat_data, radius=35, blur=25, min_opacity=0.1,
-                gradient={0.2: 'gray', 0.4: 'white', 0.7: 'cyan', 0.9: 'red'}).add_to(m)
+        # Realistic IR Gradient: Grays (low) -> Whites -> Cyans -> Reds (Heavy Convection)
+        HeatMap(sat_data, radius=38, blur=28, min_opacity=0.08,
+                gradient={0.2: 'gray', 0.4: 'white', 0.6: 'cyan', 0.8: 'red', 0.95: 'maroon'}).add_to(m)
     
     # 2. Wind Impact Visualization
     for _, row in df.iterrows():
         if row['wind'] > 30:
             color = 'red' if row['wind'] > 95 else 'orange' if row['wind'] > 75 else 'yellow' if row['wind'] > 50 else 'blue'
-            
-            # Misc Toggle: Wind Circles
             if show_circles:
-                folium.CircleMarker(
-                    location=[row['lat'], row['lon']],
-                    radius=row['wind']/6,
-                    color=color, fill=True, weight=1, fill_opacity=0.4,
-                    popup=f"{int(row['wind'])} kts"
-                ).add_to(m)
-            
-            # Flow Vectors
+                folium.CircleMarker(location=[row['lat'], row['lon']], radius=row['wind']/6,
+                                    color=color, fill=True, weight=1, fill_opacity=0.4).add_to(m)
             if show_barbs:
                 length = 0.02
                 end_lat = row['lat'] + length * np.sin(np.radians(row['dir']))
                 end_lon = row['lon'] + length * np.cos(np.radians(row['dir']))
-                
                 v_color = 'white' if map_theme == "Dark Mode" else 'black'
-                folium.PolyLine(
-                    locations=[[row['lat'], row['lon']], [end_lat, end_lon]],
-                    color=v_color, weight=1, opacity=0.6
-                ).add_to(m)
+                folium.PolyLine(locations=[[row['lat'], row['lon']], [end_lat, end_lon]],
+                                color=v_color, weight=1, opacity=0.6).add_to(m)
 
     st_folium(m, width="100%", height=750)
 
@@ -176,7 +174,6 @@ with c2:
     st.write("---")
     st.subheader("Peak Analytics")
     st.write(f"**Max Wind:** {int(df['wind'].max())} kts")
-    st.write(f"**SIMUSAT Status:** Active")
-    
+    st.write(f"**SIMUSAT Status:** Fluid Feed Active")
     if l_lon < -88.2:
         st.error("DIRTY SIDE RISK")
