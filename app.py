@@ -129,6 +129,7 @@ with st.sidebar:
     
     st.header("4. Display Settings")
     show_ir = st.checkbox("Toggle SIMUSAT (Fluid IR)", value=True)
+    ir_opacity = st.slider("SIMUSAT Opacity", 0.0, 1.0, 0.15)
     show_barbs = st.checkbox("Show Wind Flow Vectors", value=True)
     l_lat = st.number_input("Landfall Lat", value=30.35)
     l_lon = st.number_input("Landfall Lon", value=-88.15)
@@ -170,14 +171,13 @@ with c1:
     m = folium.Map(location=[30.5, -88.1], zoom_start=9, tiles=tileset)
     
     if show_ir and len(sat_data) > 0:
-        HeatMap(sat_data, radius=25, blur=18, min_opacity=0.1, max_zoom=13,
+        HeatMap(sat_data, radius=25, blur=18, min_opacity=ir_opacity, max_zoom=13,
                 gradient={0.2: 'gray', 0.4: 'white', 0.6: 'cyan', 0.8: 'red', 0.95: 'maroon'}).add_to(m)
     
     for _, row in df.iterrows():
         if row['wind'] > 30:
             color = 'red' if row['wind'] > 95 else 'orange' if row['wind'] > 75 else 'yellow' if row['wind'] > 50 else 'blue'
             if show_circles:
-                # Get dynamic popup content
                 popup_html = get_local_conditions(row['wind'], row['lat'], row['lon'], l_lat, l_lon, r_max)
                 
                 folium.CircleMarker(
