@@ -20,20 +20,15 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     
     if r < 1: r = 1
     
-    # 1. LIQUIDITY & INTENSITY
     env_mult = (rh / 85.0) * (0.6 + outflow / 2.5)
     effective_v_max = v_max * env_mult
     
-    # 2. WIND MAGNITUDE (Holland)
     B = 1.3 + (effective_v_max / 150)
     v_sym = effective_v_max * np.sqrt((r_max / r)**B * np.exp(1 - (r_max / r)**B))
     
-    # 3. WIND DIRECTION (Inflow + Rotation)
     inflow_angle = np.radians(25 if r > r_max else 15)
     wind_angle_rad = angle + (np.pi / 2) + inflow_angle
     
-    # Asymmetry & Symmetry Slider Integration
-    # Lower symmetry means shear/motion has a more "stretching" effect
     shear_rad = np.radians(shear_dir)
     asym_weight = 1.0 + (1.0 - symmetry) 
     shear_effect = 1 + (asym_weight * shear_mag / 60) * np.cos(angle - shear_rad)
@@ -42,30 +37,50 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     total_wind = (v_sym * shear_effect) + v_forward
     if lat > 30.25: total_wind *= 0.85 
     
-    # 4. SIMUSAT FLUID IR WEIGHT (Stretching + Banding + Eye)
     spiral = np.sin(r / 12.0 - angle * 2.5) 
     band_noise = max(0, spiral * 0.4)
     
-    # Cloud Top Displacement (Elongation)
-    # Cloud tops are blown downshear; symmetry slider reduces/increases this stretch
     stretch_factor = (shear_mag / 4.5) * (2.0 - symmetry)
     off_x, off_y = stretch_factor * np.cos(shear_rad), stretch_factor * np.sin(shear_rad)
     r_sat = np.sqrt((dx - off_x)**2 + (dy - off_y)**2)
     
-    # Base cloud weight
     ir_weight = np.exp(-r_sat / (r_max * 6.0)) * (rh / 100) * (0.7 + band_noise)
-    
-    # Rain Rate Coupling
     rain_coupling = (total_wind / 120) * np.exp(-r / (r_max * 2))
     ir_weight = min(1.0, ir_weight + rain_coupling)
 
-    # DYNAMIC EYE CLEARING
     eye_readiness = (v_max / 100) * (1 - (shear_mag / 45)) * (rh / 100) * symmetry
     if eye_readiness > 0.5 and r < (r_max * 0.45):
         eye_clearing = np.exp(-(r**2) / (r_max * 0.18)**2)
         ir_weight *= (1 - (eye_clearing * eye_readiness))
 
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_weight
+
+def get_local_conditions(wind, lat, lon, s_lat, s_lon, r_max):
+    """Generates localized weather data for popups based on physics."""
+    dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
+    r = np.sqrt(dx**2 + dy**2)
+    
+    # Logic for City names based on Mobile County Map
+    city = "Mobile" if lat > 30.6 else "Dauphin Island" if lat < 30.3 else "Theodore/Bayou La Batre"
+    
+    # Physics-based weather derivation
+    temp = 82 - (wind / 15) # Pressure drop/rain cools air
+    dewp = temp - (2 * (1 - (wind/150))) # High humidity in core
+    vis = max(0.1, 10 - (wind / 12)) # Rain/Spray reduces visibility
+    
+    icon = "🌪️" if wind > 95 else "⛈️" if wind > 64 else "🌧️" if wind > 34 else "☁️"
+    if r < (r_max * 0.3) and wind < 50: icon = "👁️" # Eye calm
+    
+    return f"""
+    <div style="font-family: sans-serif; min-width: 140px;">
+        <h4 style="margin:0;">{city} Area</h4>
+        <hr style="margin:5px 0;">
+        <b>{icon} Condition:</b> {int(wind)} kts<br>
+        <b>Temp:</b> {temp:.1f}°F<br>
+        <b>Dew Pt:</b> {dewp:.1f}°F<br>
+        <b>Visibility:</b> {vis:.1f} mi
+    </div>
+    """
 
 def calculate_bay_surge(v_max, s_lon):
     dist_west = -88.0 - s_lon
@@ -100,7 +115,7 @@ with st.sidebar:
     st.header("1. Environmental Factors")
     rh = st.slider("Mid-Level Humidity (%)", 30, 100, 85)
     outflow = st.slider("Outflow Efficiency", 0.0, 1.0, 0.8)
-    symmetry = st.slider("Storm Symmetry", 0.0, 1.0, 0.85, help="1.0 = Perfect Circle, 0.0 = Shear Elongated")
+    symmetry = st.slider("Storm Symmetry", 0.0, 1.0, 0.85)
     
     st.header("2. Core Parameters")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
@@ -126,9 +141,8 @@ with st.sidebar:
 p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry]
 surge_res = calculate_bay_surge(v_max, l_lon)
 
-# Increased resolution (80x80) to keep SIMUSAT "Hi-Res" when zooming in
-sat_lats = np.linspace(28.0, 33.0, 80)
-sat_lons = np.linspace(-91.0, -86.0, 80)
+sat_lats = np.linspace(28.0, 33.0, 70)
+sat_lons = np.linspace(-91.0, -86.0, 70)
 
 wind_lats = np.linspace(29.6, 31.4, 25)
 wind_lons = np.linspace(-88.9, -87.3, 25)
@@ -156,7 +170,6 @@ with c1:
     m = folium.Map(location=[30.5, -88.1], zoom_start=9, tiles=tileset)
     
     if show_ir and len(sat_data) > 0:
-        # radius and blur are dynamically balanced; max_zoom prevents point-blobs
         HeatMap(sat_data, radius=25, blur=18, min_opacity=0.1, max_zoom=13,
                 gradient={0.2: 'gray', 0.4: 'white', 0.6: 'cyan', 0.8: 'red', 0.95: 'maroon'}).add_to(m)
     
@@ -164,8 +177,16 @@ with c1:
         if row['wind'] > 30:
             color = 'red' if row['wind'] > 95 else 'orange' if row['wind'] > 75 else 'yellow' if row['wind'] > 50 else 'blue'
             if show_circles:
-                folium.CircleMarker(location=[row['lat'], row['lon']], radius=row['wind']/6,
-                                    color=color, fill=True, weight=1, fill_opacity=0.4).add_to(m)
+                # Get dynamic popup content
+                popup_html = get_local_conditions(row['wind'], row['lat'], row['lon'], l_lat, l_lon, r_max)
+                
+                folium.CircleMarker(
+                    location=[row['lat'], row['lon']], 
+                    radius=row['wind']/6,
+                    color=color, fill=True, weight=1, fill_opacity=0.4,
+                    popup=folium.Popup(popup_html, max_width=200)
+                ).add_to(m)
+            
             if show_barbs:
                 length = 0.02
                 end_lat = row['lat'] + length * np.sin(np.radians(row['dir']))
@@ -181,13 +202,7 @@ with c2:
     st.write("---")
     st.subheader("Structure Analytics")
     st.write(f"**Max Wind:** {int(df['wind'].max())} kts")
-    
-    # Structural health readout
     health = "Organized" if symmetry > 0.7 and shear_mag < 15 else "Sheared/Elongated"
     st.write(f"**Storm State:** {health}")
-    
     eye_check = (v_max / 100) * (1 - (shear_mag / 40)) * symmetry
     st.write(f"**Eye Definition:** {'High-Definition' if eye_check > 0.8 else 'Ragged' if eye_check > 0.4 else 'None'}")
-    
-    if l_lon < -88.2:
-        st.error("DIRTY SIDE RISK")
