@@ -53,35 +53,54 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000):
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_weight
 
 def get_synthetic_radar(lat, lon, s_lat, s_lon, p, r_site=(30.67, -88.24)):
-    """Produces Synthetic dBZ and Radial Velocity (kts)."""
+    """Produces High-Fidelity Synthetic dBZ and Radial Velocity (kts)."""
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, _, symmetry, _ = p
     w, wd, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p)
     
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
     angle = np.arctan2(dy, dx)
+    shear_rad = np.radians(shear_dir)
+
+    # --- Reflectivity (dBZ) Model ---
     
-    # Reflectivity (dBZ) Model
-    # 1. Eyewall Ring (Gaussian)
-    eyewall = 48 * np.exp(-((r - r_max)**2) / (r_max * 0.3)**2)
-    # 2. Spiral Bands (Log-Spiral)
-    band_logic = np.sin(r / (r_max*0.7) - angle * 2.5)
-    bands = max(0, band_logic * 35 * np.exp(-r/70))
-    # 3. Moat Suppression
-    moat = 0.2 if (r_max * 1.5 < r < r_max * 2.5) else 1.0
+    # 1. Primary Eyewall (High Intensity Gaussian Ring)
+    eyewall = 52 * np.exp(-((r - r_max)**2) / (r_max * 0.25)**2)
     
-    dbz = (eyewall + bands) * moat * (rh / 100) * symmetry
-    if r < r_max * 0.4: dbz *= 0.1 # Eye
+    # 2. Outer Eyewall (Secondary Ring for ERC simulation)
+    outer_r = r_max * 2.3
+    outer_eyewall = 38 * np.exp(-((r - outer_r)**2) / (r_max * 0.4)**2) if v_max > 100 else 0
     
-    # Radial Velocity Model (Relative to Radar Site)
+    # 3. Moat Suppression (Subsidence between rings)
+    moat_factor = 0.15 if (r_max * 1.3 < r < outer_r * 0.8 and v_max > 100) else 1.0
+    
+    # 4. Spiral Rainbands (Log-spiral with gaps)
+    # Modulation creates 'blobs' and 'gaps' within the bands
+    band_mod = np.sin(r / (r_max * 0.6) - angle * 2.8) * np.cos(angle * 1.5)
+    bands = max(0, band_mod * 40 * np.exp(-r / 120))
+    
+    # 5. Stratiform Shield (The 'Background' Rain)
+    stratiform = 15 * np.exp(-r / 200)
+    
+    # 6. Environmental Asymmetry (Shear & Motion)
+    # Typically convection is enhanced downshear-left (NH)
+    asym_angle = angle - (shear_rad + np.pi/4)
+    shear_asym = 1.0 + (shear_mag / 50) * np.cos(asym_angle)
+    dry_notch = 1.0 if (rh > 70) else (0.5 + 0.5 * np.sin(angle - shear_rad))
+
+    # Combine components
+    dbz = (eyewall + outer_eyewall + bands + stratiform) * moat_factor * shear_asym * dry_notch
+    
+    # Eye Clearing
+    if r < r_max * 0.45: dbz *= (r / (r_max * 0.45))**2 
+    
+    # --- Radial Velocity Model ---
     rdx, rdy = (lon - r_site[1]) * 53, (lat - r_site[0]) * 69
     dist_radar = np.sqrt(rdx**2 + rdy**2)
-    
-    # Dot product of wind vector and radar-relative unit vector
     u_w, v_w = w * np.cos(np.radians(wd)), w * np.sin(np.radians(wd))
     v_radial = (u_w * rdx + v_w * rdy) / max(0.1, dist_radar)
     
-    return min(65, dbz), v_radial, dist_radar
+    return min(68, dbz), v_radial, dist_radar
 
 def get_vertical_profile(lat, lon, s_lat, s_lon, p):
     levels = [1000, 925, 850, 500, 200]
@@ -99,11 +118,11 @@ def get_local_conditions(lat, lon, s_lat, s_lon, r_max, p):
     dbz, vr, rng = get_synthetic_radar(lat, lon, s_lat, s_lon, p)
     dist_storm = np.sqrt(((lon - s_lon) * 53)**2 + ((lat - s_lat) * 69)**2)
     
-    # Feature Classification
-    if dist_storm < r_max * 0.4: feat = "Eye (Clear)"
-    elif abs(dist_storm - r_max) < r_max * 0.3: feat = "Eyewall (Convective)"
-    elif r_max * 1.5 < dist_storm < r_max * 2.5: feat = "Moat (Subsidence)"
-    else: feat = "Rainband"
+    if dist_storm < r_max * 0.45: feat = "Eye (Clear)"
+    elif abs(dist_storm - r_max) < r_max * 0.3: feat = "Inner Eyewall"
+    elif abs(dist_storm - r_max * 2.3) < r_max * 0.4 and v_max > 100: feat = "Outer Eyewall (ERC)"
+    elif r_max * 1.3 < dist_storm < r_max * 1.9: feat = "Moat"
+    else: feat = "Outer Rainband"
         
     return f"""
     <div style="font-family: monospace; min-width: 200px; background: #000; color: #0f0; padding: 10px; border-radius: 5px;">
@@ -123,7 +142,7 @@ def calculate_bay_surge(v_max, s_lon):
     return base * (1.8 if dist_west > 0 else 0.5)
 
 # --- 2. STREAMLIT UI ---
-st.set_page_config(layout="wide", page_title="LHIM | Radar Diagnostics")
+st.set_page_config(layout="wide", page_title="LHIM | Full-Storm Radar")
 
 st.markdown("""
     <style>
@@ -136,12 +155,12 @@ st.markdown("""
 with st.sidebar:
     st.title("🛡️ LHIM Diagnostics")
     
-    with st.expander("🌊 SST & Radar Config", expanded=True):
-        sst_season = st.selectbox("Window", ["Early (June/July)", "Peak (Aug/Sept)", "Late (Oct/Nov)"])
+    with st.expander("📡 Radar Perspective & Climate", expanded=True):
+        sst_season = st.selectbox("Season Window", ["Early (June/July)", "Peak (Aug/Sept)", "Late (Oct/Nov)"])
         sst_mult = {"Early (June/July)": 0.85, "Peak (Aug/Sept)": 1.1, "Late (Oct/Nov)": 0.9}[sst_season]
         st.markdown("---")
         radar_mode = st.radio("Radar Layer", ["Off", "Reflectivity (dBZ)", "Radial Velocity (kts)"])
-        rad_alpha = st.slider("Radar Opacity", 0.0, 1.0, 0.5)
+        rad_alpha = st.slider("Radar Opacity", 0.0, 1.0, 0.65)
 
     st.header("1. Core Parameters")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
@@ -179,22 +198,22 @@ p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, 
 surge_res = calculate_bay_surge(v_max, l_lon)
 
 # Satellite IR Data
-sat_lats = np.linspace(28.0, 33.0, 60)
-sat_lons = np.linspace(-91.0, -86.0, 60)
 sat_data = []
-for lt in sat_lats:
-    for ln in sat_lons:
-        _, _, ir_w = calculate_full_physics(lt, ln, l_lat, l_lon, p)
-        if ir_w > 0.08: sat_data.append([lt, ln, ir_w])
+if show_ir:
+    for lt in np.linspace(28.0, 33.0, 60):
+        for ln in np.linspace(-91.0, -86.0, 60):
+            _, _, ir_w = calculate_full_physics(lt, ln, l_lat, l_lon, p)
+            if ir_w > 0.08: sat_data.append([lt, ln, ir_w])
 
-# Radar Data Grid
+# Radar Grid (High Resolution for full storm structure)
 radar_grid = []
 if radar_mode != "Off":
-    for lt in np.linspace(29.5, 31.5, 50):
-        for ln in np.linspace(-89.0, -87.0, 50):
+    for lt in np.linspace(29.0, 32.0, 70):
+        for ln in np.linspace(-90.0, -86.5, 70):
             dbz, vr, _ = get_synthetic_radar(lt, ln, l_lat, l_lon, p)
             val = dbz if radar_mode == "Reflectivity (dBZ)" else abs(vr)
-            if val > (10 if radar_mode == "Reflectivity (dBZ)" else 20):
+            # Threshold for visibility
+            if (radar_mode == "Reflectivity (dBZ)" and val > 12) or (radar_mode == "Radial Velocity (kts)" and val > 15):
                 radar_grid.append([lt, ln, val])
 
 # --- 4. MAPPING ---
@@ -203,17 +222,15 @@ c1, c2 = st.columns([4, 1.5])
 with c1:
     m = folium.Map(location=[30.5, -88.1], zoom_start=9, tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap")
     
-    # 1. SIMUSAT IR
     if show_ir and len(sat_data) > 0:
         HeatMap(sat_data, radius=25, blur=18, min_opacity=ir_opacity, max_zoom=13,
                 gradient={0.2: 'gray', 0.4: 'white', 0.6: 'cyan', 0.8: 'red', 0.95: 'maroon'}).add_to(m)
     
-    # 2. Synthetic Radar
     if radar_mode != "Off" and len(radar_grid) > 0:
-        grad = {0.1: 'blue', 0.4: 'green', 0.7: 'yellow', 0.9: 'red', 1.0: 'fuchsia'} if "Reflectivity" in radar_mode else {0.3: 'cyan', 0.6: 'white', 0.9: 'red'}
-        HeatMap(radar_grid, radius=12, blur=10, min_opacity=rad_alpha, gradient=grad).add_to(m)
+        grad = {0.1: 'blue', 0.3: '#00ff00', 0.5: '#ffff00', 0.7: '#ff9900', 0.9: '#ff0000', 1.0: '#ff00ff'} if "Reflectivity" in radar_mode else {0.2: 'cyan', 0.5: 'white', 0.8: 'red'}
+        HeatMap(radar_grid, radius=10, blur=8, min_opacity=rad_alpha, gradient=grad).add_to(m)
 
-    # 3. Wind & Sounding Points
+    # Sounding and Wind Points
     for lt in np.linspace(29.6, 31.4, 15):
         for ln in np.linspace(-88.9, -87.3, 15):
             w, wd, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p, level=1000)
@@ -231,19 +248,19 @@ with c1:
 
 with c2:
     st.metric("Est. Bay Surge", f"{surge_res:.1f} ft")
-    st.markdown('<p class="radar-note">Synthetic Radar (Estimated) — generated from LHIM storm structure; NOT observed radar.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="radar-note">Synthetic Radar (Estimated) — Includes Double Eyewall & Shear Asymmetry Logic.</p>', unsafe_allow_html=True)
     st.write("---")
     
     if last_click and last_click.get("last_clicked"):
         clat, clon = last_click["last_clicked"]["lat"], last_click["last_clicked"]["lng"]
-        st.subheader("📍 Vertical Sounding")
+        st.subheader("📍 Cell Sounding")
         pdf = pd.DataFrame(get_vertical_profile(clat, clon, l_lat, l_lon, p))
         st.table(pdf.set_index('Level (mb)'))
         st.line_chart(pdf[['Temp (°C)', 'Dewp (°C)']])
     else:
-        st.info("Click the map to inspect radar cells or vertical atmospheric profiles.")
+        st.info("Click map icons for Radarscope-style cell data.")
     
     st.subheader("Structure Analytics")
     eye_check = (v_max / 100) * (1 - (shear_mag / 40)) * symmetry
-    st.write(f"**Eye Definition:** {'HD' if eye_check > 0.8 else 'Ragged' if eye_check > 0.4 else 'None'}")
+    st.write(f"**Convective Organization:** {'Highly Defined' if eye_check > 0.8 else 'Broad/Disorganized' if eye_check < 0.4 else 'Steady'}")
     st.progress(min(max(eye_check, 0.0), 1.0))
