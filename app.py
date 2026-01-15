@@ -9,7 +9,7 @@ from streamlit_folium import st_folium
 
 def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     """
-    Enhanced Physics: Wind, Rain-Coupled IR, and Spiral Banding.
+    Enhanced Physics: Wind, Rain-Coupled IR, Spiral Banding, and Dynamic Eye Clearing.
     """
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow = p
     
@@ -40,9 +40,8 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     total_wind = (v_sym * shear_effect) + v_forward
     if lat > 30.25: total_wind *= 0.85 
     
-    # 4. SIMUSAT FLUID IR WEIGHT (Spiral Bands + Rain Rate)
-    # Adding a logarithmic spiral factor for banding
-    spiral = np.sin(r / 12.0 - angle * 2.5) # The "Fluid" band logic
+    # 4. SIMUSAT FLUID IR WEIGHT (Spiral Bands + Rain Rate + Eye Logic)
+    spiral = np.sin(r / 12.0 - angle * 2.5) 
     band_noise = max(0, spiral * 0.4)
     
     # Shift canopy downshear (Outflow tilt)
@@ -55,7 +54,15 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p):
     # Rain Rate Coupling: Coldest tops (Red/Cyan) where wind is highest
     rain_coupling = (total_wind / 120) * np.exp(-r / (r_max * 2))
     ir_weight = min(1.0, ir_weight + rain_coupling)
-    
+
+    # --- DYNAMIC EYE CLEARING LOGIC ---
+    # Real storms clear an eye when: Strong Vmax, Low Shear, High RH/Outflow
+    eye_readiness = (v_max / 100) * (1 - (shear_mag / 40)) * (rh / 100)
+    if eye_readiness > 0.6 and r < (r_max * 0.4):
+        # Create a "dip" in IR weight at the center (the eye)
+        eye_clearing = np.exp(-(r**2) / (r_max * 0.15)**2)
+        ir_weight *= (1 - (eye_clearing * eye_readiness))
+
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_weight
 
 def calculate_bay_surge(v_max, s_lon):
@@ -93,13 +100,13 @@ with st.sidebar:
     outflow = st.slider("Outflow Efficiency", 0.0, 1.0, 0.8)
     
     st.header("2. Core Parameters")
-    v_max = st.slider("Intensity (kts)", 40, 160, 110)
+    v_max = st.slider("Intensity (kts)", 40, 160, 115)
     f_speed = st.slider("Forward Speed (mph)", 2, 40, 12)
     f_dir = st.slider("Storm Heading (Deg)", 0, 360, 330)
-    r_max = st.slider("RMW (miles)", 10, 60, 30)
+    r_max = st.slider("RMW (miles)", 10, 60, 25)
     
     st.header("3. Upper Level Shear")
-    shear_mag = st.slider("Shear Magnitude (kts)", 0, 60, 12)
+    shear_mag = st.slider("Shear Magnitude (kts)", 0, 60, 8)
     shear_dir = st.slider("Shear Direction (From)", 0, 360, 260)
     
     st.header("4. Display Settings")
@@ -116,11 +123,9 @@ with st.sidebar:
 p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow]
 surge_res = calculate_bay_surge(v_max, l_lon)
 
-# Expanded satellite grid (2x larger than wind box to avoid "boxed in" look)
-sat_lats = np.linspace(28.5, 32.5, 45)
-sat_lons = np.linspace(-90.5, -86.5, 45)
+sat_lats = np.linspace(28.5, 32.5, 50)
+sat_lons = np.linspace(-90.5, -86.5, 50)
 
-# Original wind grid for the Mobile region
 wind_lats = np.linspace(29.6, 31.4, 25)
 wind_lons = np.linspace(-88.9, -87.3, 25)
 
@@ -128,7 +133,7 @@ sat_data = []
 for lt in sat_lats:
     for ln in sat_lons:
         _, _, ir_w = calculate_full_physics(lt, ln, l_lat, l_lon, p)
-        if ir_w > 0.1:
+        if ir_w > 0.08:
             sat_data.append([lt, ln, ir_w])
 
 results = []
@@ -146,13 +151,10 @@ with c1:
     tileset = "CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap"
     m = folium.Map(location=[30.5, -88.1], zoom_start=9, tiles=tileset)
     
-    # 1. SIMUSAT (Fluid IR Satellite)
     if show_ir and len(sat_data) > 0:
-        # Realistic IR Gradient: Grays (low) -> Whites -> Cyans -> Reds (Heavy Convection)
         HeatMap(sat_data, radius=38, blur=28, min_opacity=0.08,
                 gradient={0.2: 'gray', 0.4: 'white', 0.6: 'cyan', 0.8: 'red', 0.95: 'maroon'}).add_to(m)
     
-    # 2. Wind Impact Visualization
     for _, row in df.iterrows():
         if row['wind'] > 30:
             color = 'red' if row['wind'] > 95 else 'orange' if row['wind'] > 75 else 'yellow' if row['wind'] > 50 else 'blue'
@@ -174,6 +176,10 @@ with c2:
     st.write("---")
     st.subheader("Peak Analytics")
     st.write(f"**Max Wind:** {int(df['wind'].max())} kts")
-    st.write(f"**SIMUSAT Status:** Fluid Feed Active")
+    
+    # Structure Check for UI
+    eye_check = (v_max / 100) * (1 - (shear_mag / 40))
+    st.write(f"**Eye Definition:** {'High-Definition' if eye_check > 0.8 else 'Cloud Filled' if eye_check > 0.4 else 'None'}")
+    
     if l_lon < -88.2:
         st.error("DIRTY SIDE RISK")
