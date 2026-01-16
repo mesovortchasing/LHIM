@@ -2,21 +2,18 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import folium
-import json
+from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 
-# --- 1. CORE PHYSICS & CLIMATOLOGY ENGINE ---
+# --- 1. CORE PHYSICS & RADAR ENGINE ---
 
-def get_sst_multiplier(month_name):
-    """
-    Climatological SST multipliers based on Atlantic Basin averages.
-    Peak (Sept) provides the highest potential intensity.
-    """
-    climatology = {
-        "June": 0.82, "July": 0.88, "August": 0.98, 
-        "September": 1.10, "October": 0.94, "November": 0.80
+def get_sst_mult(month):
+    """Climatological SST multipliers for the Atlantic Basin."""
+    months = {
+        "June": 0.85, "July": 0.92, "August": 1.05, 
+        "September": 1.15, "October": 1.02, "November": 0.88
     }
-    return climatology.get(month_name, 1.0)
+    return months.get(month, 1.0)
 
 def get_wind_arrow(deg):
     arrows = ['↓', '↙', '←', '↖', '↑', '↗', '→', '↘']
@@ -25,91 +22,90 @@ def get_wind_arrow(deg):
 
 def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000):
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
-    
-    dx = (lon - s_lon) * 53
-    dy = (lat - s_lat) * 69
+    dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
     angle = np.arctan2(dy, dx)
-    
     if r < 1: r = 1
     
     level_scale = {1000: 1.0, 925: 0.92, 850: 0.85, 500: 0.45, 200: 0.25}
     l_mult = level_scale.get(level, 1.0)
     
     env_mult = (rh / 85.0) * (0.6 + outflow / 2.5) * sst_mult
-    effective_v_max = v_max * env_mult * l_mult
+    eff_v = v_max * env_mult * l_mult
     
-    B = 1.3 + (effective_v_max / 150)
-    v_sym = effective_v_max * np.sqrt((r_max / r)**B * np.exp(1 - (r_max / r)**B))
+    B = 1.3 + (eff_v / 150)
+    v_sym = eff_v * np.sqrt((r_max / r)**B * np.exp(1 - (r_max / r)**B))
     
-    inflow_val = 25 if level > 500 else -30 
-    inflow_angle = np.radians(inflow_val if r > r_max else inflow_val/2)
-    wind_angle_rad = angle + (np.pi / 2) + inflow_angle
+    inflow = 25 if level > 500 else -30
+    wind_angle_rad = angle + (np.pi / 2) + np.radians(inflow if r > r_max else inflow/2)
     
     shear_rad = np.radians(shear_dir)
-    asym_weight = 1.0 + (1.0 - symmetry) 
     shear_factor = (shear_mag / 40) if level < 500 else (shear_mag / 60)
-    shear_effect = 1 + (asym_weight * shear_factor) * np.cos(angle - shear_rad)
+    shear_effect = 1 + ((1.0 - symmetry) * shear_factor) * np.cos(angle - shear_rad)
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
     
     total_wind = (v_sym * shear_effect) + v_forward
-    if lat > 30.25 and level == 1000: total_wind *= 0.85 
+    ir_w = np.exp(-r / (r_max * 6.0)) * (rh / 100) * (0.7 + max(0, np.sin(r/12 - angle*2.5)*0.4))
     
-    ir_weight = np.exp(-r / (r_max * 6.0)) * (rh / 100) * (0.7 + max(0, np.sin(r/12 - angle*2.5) * 0.4))
-    
-    return max(0, total_wind), np.degrees(wind_angle_rad), ir_weight
+    return max(0, total_wind), np.degrees(wind_angle_rad), ir_w
 
-def get_synthetic_radar(lat, lon, s_lat, s_lon, p):
-    """Generates high-resolution Doppler-style reflectivity."""
-    v_max, r_max, _, _, shear_mag, _, rh, _, symmetry, _ = p
+def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60):
+    """Calculates Reflectivity and Radial Velocity with Dealiasing."""
+    v_max, r_max, _, _, _, _, rh, _, symmetry, _ = p
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
     angle = np.arctan2(dy, dx)
     
-    # 1. Primary Eyewall (Sharp Gradient)
-    eyewall = 62 * np.exp(-((r - r_max)**2) / (r_max * 0.2)**2)
+    # 1. Reflectivity (dBZ)
+    eyewall = 60 * np.exp(-((r - r_max)**2) / (r_max * 0.22)**2)
+    outer_r = r_max * 2.4
+    outer_eyewall = 42 * np.exp(-((r - outer_r)**2) / (r_max * 0.4)**2) if v_max > 105 else 0
+    moat = 0.45 if (r_max * 1.4 < r < outer_r * 0.85 and v_max > 105) else 1.0
+    bands = max(0, np.sin(r / (r_max * 0.6) - angle * 2.8) * 44 * np.exp(-r / 135))
+    dbz = (eyewall + outer_eyewall + bands + 15) * moat * (rh / 100) * symmetry
+    if r < r_max * 0.4: dbz *= 0.05 # Eye
     
-    # 2. Outer Eyewall / Bands
-    outer_r = r_max * 2.3
-    outer_eyewall = 45 * np.exp(-((r - outer_r)**2) / (r_max * 0.3)**2) if v_max > 95 else 0
+    # 2. Velocity (Radial with Folding)
+    w, wd, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p)
+    radial_v = w * np.cos(np.radians(wd) - angle)
+    aliased_v = ((radial_v + nyquist) % (2 * nyquist)) - nyquist
     
-    # 3. Moat Logic
-    moat = 0.15 if (r_max * 1.3 < r < outer_r * 0.85 and v_max > 95) else 1.0
+    # 3. Surge Potential (Simplified SLOSH-lite logic)
+    # Higher on the right side (angle 0 to pi) due to onshore flow
+    surge = (w**2 / 1800) * (1.2 if np.sin(angle) > 0 else 0.4)
     
-    # 4. Log-Spiral Rainbands
-    band_mod = np.sin(r / (r_max * 0.6) - angle * 3.0)
-    bands = max(0, band_mod * 48 * np.exp(-r / 140))
-    
-    # Composition
-    dbz = (eyewall + outer_eyewall + bands + 8) * moat * (rh / 100) * symmetry
-    
-    # Eye Suppression
-    if r < r_max * 0.45: dbz *= 0.02
-    
-    return min(75, dbz)
+    # 4. Wind Prob
+    prob = (w / v_max) * 100 * symmetry
 
-def get_dbz_color(dbz):
-    """Standard NWS Reflectivity Palette."""
-    if dbz < 15: return None
-    if dbz < 20: return "#0099ff" # Light Blue
-    if dbz < 30: return "#0000ff" # Blue
-    if dbz < 40: return "#00ff00" # Green
-    if dbz < 50: return "#ffff00" # Yellow
-    if dbz < 60: return "#ff9900" # Orange
-    return "#ff0000"             # Red (Heavy)
+    return min(75, dbz), aliased_v, surge, prob
+
+def get_local_conditions(lat, lon, s_lat, s_lon, p):
+    w, _, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p)
+    dist = np.sqrt(((lon-s_lon)*53)**2 + ((lat-s_lat)*69)**2)
+    temp, dewp = 76.0 - (dist / 18), 75.2 - (dist / 18)
+    return f"""
+    <div style="font-family: sans-serif; min-width: 160px; background: #111; color: #eee; padding: 10px; border-radius: 8px;">
+        <b style="font-size: 1.1em;">Location Area</b><br>
+        <hr style="margin: 5px 0; border: 0.1px solid #444;">
+        🌪️ <b>Condition:</b> {int(w)} kts<br>
+        🌡️ <b>Temp:</b> {temp:.1f}°F<br>
+        💧 <b>Dew Pt:</b> {dewp:.1f}°F<br>
+        👁️ <b>Visibility:</b> {max(0.1, 10-(w/12)):.1f} mi
+    </div>
+    """
 
 # --- 2. STREAMLIT UI ---
-st.set_page_config(layout="wide", page_title="LHIM | Doppler Simulation")
+st.set_page_config(layout="wide", page_title="LHIM | Alpha")
 
 with st.sidebar:
-    st.title("🛡️ LHIM Doppler")
+    st.title("🛡️ LHIM Alpha")
     
-    with st.expander("📡 Climatology & Sensors", expanded=True):
-        sel_month = st.selectbox("Climatological Month", ["June", "July", "August", "September", "October", "November"], index=3)
-        sst_mult = get_sst_multiplier(sel_month)
-        radar_mode = st.checkbox("Enable Doppler Reflectivity", value=True)
-        radar_res = st.select_slider("Radar Grain (Resolution)", options=[40, 60, 80], value=60)
-        radar_alpha = st.slider("Radar Opacity", 0.1, 1.0, 0.7)
+    with st.expander("📡 Sensors & Climatology", expanded=True):
+        month = st.selectbox("Month", ["June", "July", "August", "September", "October", "November"], index=3)
+        p_sst = get_sst_mult(month)
+        radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
+        nyquist = st.slider("Nyquist Limit (Folding)", 30, 100, 65)
+        radar_alpha = st.slider("Layer Opacity", 0.1, 1.0, 0.65)
 
     st.header("1. Core Parameters")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
@@ -128,71 +124,59 @@ with st.sidebar:
     l_lon = st.number_input("Landfall Lon", value=-88.15)
     map_theme = st.selectbox("Theme", ["Dark Mode", "Light Mode"])
 
-p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult]
+p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, p_sst]
 
-# --- 3. MAPPING & GRIDDING ---
+# --- 3. MAPPING ---
 c1, c2 = st.columns([4, 1.5])
 
 with c1:
-    m = folium.Map(location=[l_lat, l_lon], zoom_start=8, 
+    m = folium.Map(location=[l_lat, l_lon], zoom_start=9, 
                    tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap")
+    
+    radar_group = folium.FeatureGroup(name="LHIM Layers")
+    lat_steps, lon_steps = 55, 65
+    lats = np.linspace(l_lat - 2.5, l_lat + 2.5, lat_steps)
+    lons = np.linspace(l_lon - 3.0, l_lon + 3.0, lon_steps)
+    d_lat, d_lon = lats[1]-lats[0], lons[1]-lons[0]
 
-    # DOPPLER GRIDDING (Preserves structure at all zoom levels)
-    if radar_mode:
-        lat_range = np.linspace(l_lat - 2.5, l_lat + 2.5, radar_res)
-        lon_range = np.linspace(l_lon - 3.0, l_lon + 3.0, radar_res)
-        d_lat = lat_range[1] - lat_range[0]
-        d_lon = lon_range[1] - lon_range[0]
+    for lt in lats:
+        for ln in lons:
+            dbz, vel, surge, prob = get_synthetic_products(lt, ln, l_lat, l_lon, p, nyquist)
+            
+            color = None
+            if radar_view == "Reflectivity (dBZ)" and dbz > 15:
+                color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00' if dbz > 20 else '#0000ff'
+            elif radar_view == "Velocity (kts)":
+                v_norm = np.clip(vel / nyquist, -1, 1)
+                color = '#ff0000' if v_norm > 0.6 else '#ff9999' if v_norm > 0 else '#99ff99' if v_norm > -0.6 else '#00aa00'
+            elif radar_view == "Storm Surge" and surge > 1.5:
+                color = '#330066' if surge > 12 else '#0033ff' if surge > 6 else '#00ffff'
+            elif radar_view == "Wind Prob." and prob > 20:
+                color = '#800000' if prob > 80 else '#ff3300' if prob > 50 else '#ffcc00'
+            
+            if color:
+                folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_color=color, fill_opacity=radar_alpha, weight=0).add_to(radar_group)
+    
+    radar_group.add_to(m)
 
-        for lt in lat_range:
-            for ln in lon_range:
-                dbz = get_synthetic_radar(lt, ln, l_lat, l_lon, p)
-                color = get_dbz_color(dbz)
-                if color:
-                    # Draw a pixel rectangle to mimic doppler bins
-                    folium.Rectangle(
-                        bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
-                        color=color, fill=True, fill_color=color,
-                        fill_opacity=radar_alpha, weight=0, stroke=False,
-                        interactive=False
-                    ).add_to(m)
-
-    # Observation Points (Wind Markers)
     for lt in np.linspace(l_lat-1.2, l_lat+1.2, 12):
         for ln in np.linspace(l_lon-1.5, l_lon+1.5, 12):
             w, _, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
             if w > 35:
-                # Inspector Popup logic
-                dist = np.sqrt(((ln-l_lon)*53)**2 + ((lt-l_lat)*69)**2)
-                temp, dewp = 75.0 - (dist/20), 74.5 - (dist/20)
-                popup_html = f"""
-                <div style='font-family: sans-serif; min-width: 140px; background: #111; color: #eee; padding: 8px; border-radius: 5px;'>
-                <b>Area Reading</b><br><hr style='margin:4px 0;'>
-                🌪️ <b>Condition:</b> {int(w)} kts<br>
-                🌡️ <b>Temp:</b> {temp:.1f}°F<br>
-                💧 <b>Dew Pt:</b> {dewp:.1f}°F<br>
-                👁️ <b>Vis:</b> {max(0.1, 10-(w/12)):.1f} mi
-                </div>"""
+                color = 'red' if w > 95 else 'orange' if w > 64 else 'yellow'
                 folium.CircleMarker(
-                    location=[lt, ln], radius=w/9, color='white', weight=1, fill=False,
-                    popup=folium.Popup(popup_html, max_width=200)
+                    location=[lt, ln], radius=w/8, color=color, fill=True, weight=1, fill_opacity=0.3,
+                    popup=folium.Popup(get_local_conditions(lt, ln, l_lat, l_lon, p), max_width=200)
                 ).add_to(m)
 
-    last_click = st_folium(m, width="100%", height=780)
+    st_folium(m, width="100%", height=750, key="lhim_alpha_map")
 
 with c2:
-    st.subheader("📍 Cell Inspector")
-    if last_click and last_click.get("last_clicked"):
-        clat, clon = last_click["last_clicked"]["lat"], last_click["last_clicked"]["lng"]
-        levels = [1000, 925, 850, 500, 200]
-        p_data = []
-        for lvl in levels:
-            w, wd, _ = calculate_full_physics(clat, clon, l_lat, l_lon, p, level=lvl)
-            p_data.append({"Level": lvl, "Wind": int(w), "Dir": get_wind_arrow(wd)})
-        st.table(pd.DataFrame(p_data).set_index("Level"))
-    else:
-        st.info("Click the map to sample the atmosphere.")
-        
-    st.metric("SST Potency (Month)", f"{sel_month}", f"{sst_mult:.2f}x")
+    st.subheader("📍 Data Portal")
+    st.metric("SST Influence", f"{month}", f"{p_sst:.2f}x")
     st.write("---")
-    st.caption("Radar engine uses bin-gridding to maintain anatomical realism (moats/bands) regardless of zoom.")
+    st.markdown("### Structural Health")
+    eye_check = (v_max / 100) * (1 - (shear_mag / 40)) * symmetry
+    st.write(f"**Eye Def:** {'Clear' if eye_check > 0.8 else 'Ragged' if eye_check > 0.4 else 'Obscured'}")
+    st.progress(min(max(eye_check, 0.0), 1.0))
+    st.info("The Surge layer estimates coastal threat. Probability layer shows risk of hurricane-force winds.")
