@@ -50,7 +50,7 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000):
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_w
 
 def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60):
-    """Calculates Reflectivity and Radial Velocity with Dealiasing."""
+    """Calculates Reflectivity, Velocity, Surge, and Probabilities."""
     v_max, r_max, _, _, _, _, rh, _, symmetry, _ = p
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
@@ -63,16 +63,17 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60):
     moat = 0.45 if (r_max * 1.4 < r < outer_r * 0.85 and v_max > 105) else 1.0
     bands = max(0, np.sin(r / (r_max * 0.6) - angle * 2.8) * 44 * np.exp(-r / 135))
     dbz = (eyewall + outer_eyewall + bands + 15) * moat * (rh / 100) * symmetry
-    if r < r_max * 0.4: dbz *= 0.05 # Eye
+    if r < r_max * 0.4: dbz *= 0.05 
     
     # 2. Velocity (Radial with Folding)
     w, wd, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p)
     radial_v = w * np.cos(np.radians(wd) - angle)
     aliased_v = ((radial_v + nyquist) % (2 * nyquist)) - nyquist
     
-    # 3. Surge Potential (Simplified SLOSH-lite logic)
-    # Higher on the right side (angle 0 to pi) due to onshore flow
-    surge = (w**2 / 1800) * (1.2 if np.sin(angle) > 0 else 0.4)
+    # 3. Surge (Coastal Masking: Only above Lat 30.2 for Gulf Coast simulation)
+    surge = 0
+    if lat > 30.20:
+        surge = (w**2 / 1900) * (1.3 if np.sin(angle) > 0 else 0.3)
     
     # 4. Wind Prob
     prob = (w / v_max) * 100 * symmetry
@@ -94,17 +95,45 @@ def get_local_conditions(lat, lon, s_lat, s_lon, p):
     </div>
     """
 
+def get_vertical_profile(lat, lon, s_lat, s_lon, p):
+    levels = [1000, 925, 850, 500, 200]
+    profile = []
+    for lvl in levels:
+        w, wd, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p, level=lvl)
+        dist = np.sqrt(((lon-s_lon)*53)**2 + ((lat-s_lat)*69)**2)
+        temp = (30 if lvl > 800 else 0 if lvl > 400 else -50) + max(0, (15 - dist/5))
+        dewp = temp - (dist/10) - (lvl/1000 * 5)
+        profile.append({"Level": lvl, "Wind": int(w), "Barb": get_wind_arrow(wd), "Temp": round(temp,1), "Dewp": round(dewp,1)})
+    return profile
+
 # --- 2. STREAMLIT UI ---
 st.set_page_config(layout="wide", page_title="LHIM | Alpha")
 
+# Map Legend Injection
+def add_legend(m, mode):
+    legends = {
+        "Reflectivity (dBZ)": ("Reflectivity", ["#0000ff", "#00ff00", "#ffff00", "#ff9900", "#ff0000"], ["20", "30", "40", "50", "60+"]),
+        "Velocity (kts)": ("Radial Vel", ["#00aa00", "#99ff99", "#ff9999", "#ff0000"], ["Toward", "-30", "+30", "Away"]),
+        "Storm Surge": ("Surge (ft)", ["#00ffff", "#0033ff", "#330066"], ["1-5", "6-12", "15+"]),
+        "Wind Prob.": ("Prob (%)", ["#ffcc00", "#ff3300", "#800000"], ["20", "50", "80+"])
+    }
+    title, colors, labels = legends[mode]
+    html = f'''
+    <div style="position: fixed; top: 10px; right: 10px; width: 120px; z-index:9999; background: rgba(0,0,0,0.8); 
+    color: white; padding: 10px; border-radius: 5px; font-family: sans-serif; font-size: 12px; border: 1px solid #444;">
+    <b>{title}</b><br>'''
+    for c, l in zip(colors, labels):
+        html += f'<i style="background: {c}; width: 12px; height: 12px; float: left; margin-right: 5px; opacity: 0.8;"></i> {l}<br>'
+    html += '</div>'
+    m.get_root().html.add_child(folium.Element(html))
+
 with st.sidebar:
     st.title("🛡️ LHIM Alpha")
-    
     with st.expander("📡 Sensors & Climatology", expanded=True):
         month = st.selectbox("Month", ["June", "July", "August", "September", "October", "November"], index=3)
         p_sst = get_sst_mult(month)
         radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
-        nyquist = st.slider("Nyquist Limit (Folding)", 30, 100, 65)
+        nyquist = st.slider("Nyquist Limit", 30, 100, 65)
         radar_alpha = st.slider("Layer Opacity", 0.1, 1.0, 0.65)
 
     st.header("1. Core Parameters")
@@ -114,14 +143,9 @@ with st.sidebar:
     r_max = st.slider("RMW (miles)", 10, 60, 25)
     
     st.header("2. Environment")
-    rh = st.slider("Humidity (%)", 30, 100, 85)
-    outflow = st.slider("Outflow Eff.", 0.0, 1.0, 0.8)
-    symmetry = st.slider("Symmetry", 0.0, 1.0, 0.85)
-    shear_mag = st.slider("Shear (kts)", 0, 60, 8)
-    shear_dir = st.slider("Shear From (Deg)", 0, 360, 260)
-    
-    l_lat = st.number_input("Landfall Lat", value=30.35)
-    l_lon = st.number_input("Landfall Lon", value=-88.15)
+    rh, outflow, symmetry = st.slider("Humidity", 30, 100, 85), st.slider("Outflow", 0.0, 1.0, 0.8), st.slider("Symmetry", 0.0, 1.0, 0.85)
+    shear_mag, shear_dir = st.slider("Shear (kts)", 0, 60, 8), st.slider("Shear From", 0, 360, 260)
+    l_lat, l_lon = st.number_input("Landfall Lat", value=30.35), st.number_input("Landfall Lon", value=-88.15)
     map_theme = st.selectbox("Theme", ["Dark Mode", "Light Mode"])
 
 p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, p_sst]
@@ -130,19 +154,17 @@ p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, 
 c1, c2 = st.columns([4, 1.5])
 
 with c1:
-    m = folium.Map(location=[l_lat, l_lon], zoom_start=9, 
-                   tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap")
+    m = folium.Map(location=[l_lat, l_lon], zoom_start=9, tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap")
+    add_legend(m, radar_view)
     
     radar_group = folium.FeatureGroup(name="LHIM Layers")
     lat_steps, lon_steps = 55, 65
-    lats = np.linspace(l_lat - 2.5, l_lat + 2.5, lat_steps)
-    lons = np.linspace(l_lon - 3.0, l_lon + 3.0, lon_steps)
+    lats, lons = np.linspace(l_lat-2.5, l_lat+2.5, lat_steps), np.linspace(l_lon-3.0, l_lon+3.0, lon_steps)
     d_lat, d_lon = lats[1]-lats[0], lons[1]-lons[0]
 
     for lt in lats:
         for ln in lons:
             dbz, vel, surge, prob = get_synthetic_products(lt, ln, l_lat, l_lon, p, nyquist)
-            
             color = None
             if radar_view == "Reflectivity (dBZ)" and dbz > 15:
                 color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00' if dbz > 20 else '#0000ff'
@@ -163,20 +185,22 @@ with c1:
         for ln in np.linspace(l_lon-1.5, l_lon+1.5, 12):
             w, _, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
             if w > 35:
-                color = 'red' if w > 95 else 'orange' if w > 64 else 'yellow'
-                folium.CircleMarker(
-                    location=[lt, ln], radius=w/8, color=color, fill=True, weight=1, fill_opacity=0.3,
-                    popup=folium.Popup(get_local_conditions(lt, ln, l_lat, l_lon, p), max_width=200)
-                ).add_to(m)
+                folium.CircleMarker(location=[lt, ln], radius=w/8, color='white', fill=True, weight=1, fill_opacity=0.3,
+                                    popup=folium.Popup(get_local_conditions(lt, ln, l_lat, l_lon, p), max_width=200)).add_to(m)
 
-    st_folium(m, width="100%", height=750, key="lhim_alpha_map")
+    last_click = st_folium(m, width="100%", height=750, key="lhim_alpha_map")
 
 with c2:
-    st.subheader("📍 Data Portal")
+    st.subheader("📍 Conditions Tracker")
+    if last_click and last_click.get("last_clicked"):
+        clat, clon = last_click["last_clicked"]["lat"], last_click["last_clicked"]["lng"]
+        pdf = pd.DataFrame(get_vertical_profile(clat, clon, l_lat, l_lon, p))
+        st.caption(f"Sampling: {clat:.2f}, {clon:.2f}")
+        st.table(pdf.set_index('Level'))
+        st.line_chart(pdf[['Temp', 'Dewp']])
+    else:
+        st.info("Click any marker to track local conditions and vertical soundings.")
+    
     st.metric("SST Influence", f"{month}", f"{p_sst:.2f}x")
-    st.write("---")
-    st.markdown("### Structural Health")
-    eye_check = (v_max / 100) * (1 - (shear_mag / 40)) * symmetry
-    st.write(f"**Eye Def:** {'Clear' if eye_check > 0.8 else 'Ragged' if eye_check > 0.4 else 'Obscured'}")
-    st.progress(min(max(eye_check, 0.0), 1.0))
-    st.info("The Surge layer estimates coastal threat. Probability layer shows risk of hurricane-force winds.")
+    st.progress(min(max((v_max/160) * symmetry, 0.0), 1.0))
+    st.caption("Intensity Efficiency Profile")
