@@ -55,24 +55,21 @@ def get_hourly_forecast(lat, lon, s_lat, s_lon, p):
     forecast_data = []
     
     for h in range(1, 7):
-        # Calculate storm displacement (approx degrees per hour)
         dist_move = (f_speed * h) / 69.0 
         move_rad = np.radians(f_dir)
         new_s_lat = s_lat + (dist_move * np.cos(move_rad))
         new_s_lon = s_lon + (dist_move * np.sin(move_rad))
         
-        # Land Friction Factor: Decay intensity if center moves inland
         friction = 0.85 if new_s_lat > 30.4 else 1.0
         p_current = [v_max * friction, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult]
         
         w_kts, wd, _ = calculate_full_physics(lat, lon, new_s_lat, new_s_lon, p_current)
         w_mph = w_kts * 1.15
         
-        # Color Coding logic
-        color = "#ffffff" # Default
-        if w_mph >= 106: color = "#ff4b4b" # Red
-        elif w_mph >= 76: color = "#ffa500" # Orange
-        elif w_mph >= 45: color = "#ffff00" # Yellow
+        color = "#ffffff" 
+        if w_mph >= 106: color = "#ff4b4b" 
+        elif w_mph >= 76: color = "#ffa500" 
+        elif w_mph >= 45: color = "#ffff00" 
         
         icon = "🌀" if w_mph > 74 else "🌧️" if w_mph > 39 else "☁️"
         
@@ -85,18 +82,29 @@ def get_hourly_forecast(lat, lon, s_lat, s_lon, p):
         })
     return forecast_data
 
-def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60):
+def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, erc_params=None):
     v_max, r_max, _, _, _, _, rh, _, symmetry, _ = p
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
     angle = np.arctan2(dy, dx)
     
+    # --- SURGICAL ERC INTEGRATION ---
     eyewall = 60 * np.exp(-((r - r_max)**2) / (r_max * 0.22)**2)
-    outer_r = r_max * 2.4
-    outer_eyewall = 42 * np.exp(-((r - outer_r)**2) / (r_max * 0.4)**2) if v_max > 105 else 0
-    moat = 0.45 if (r_max * 1.4 < r < outer_r * 0.85 and v_max > 105) else 1.0
+    
+    # ERC Logic: Add secondary wind/reflectivity ring
+    if erc_params and erc_params['active']:
+        outer_r_pos = r_max * 2.8
+        secondary_ring = (erc_params['strength'] * 45) * np.exp(-((r - outer_r_pos)**2) / (r_max * 0.6)**2)
+        eyewall = max(eyewall, secondary_ring)
+        moat_factor = 0.3 if (r_max * 1.3 < r < outer_r_pos * 0.8) else 1.0
+    else:
+        outer_r = r_max * 2.4
+        outer_eyewall = 42 * np.exp(-((r - outer_r)**2) / (r_max * 0.4)**2) if v_max > 105 else 0
+        eyewall = max(eyewall, outer_eyewall)
+        moat_factor = 0.45 if (r_max * 1.4 < r < outer_r * 0.85 and v_max > 105) else 1.0
+
     bands = max(0, np.sin(r / (r_max * 0.6) - angle * 2.8) * 44 * np.exp(-r / 135))
-    dbz = (eyewall + outer_eyewall + bands + 15) * moat * (rh / 100) * symmetry
+    dbz = (eyewall + bands + 15) * moat_factor * (rh / 100) * symmetry
     if r < r_max * 0.4: dbz *= 0.05 
     
     w, wd, _ = calculate_full_physics(lat, lon, s_lat, s_lon, p)
@@ -137,6 +145,29 @@ def get_vertical_profile(lat, lon, s_lat, s_lon, p):
         profile.append({"Level": lvl, "Wind": int(w), "Barb": get_wind_arrow(wd), "Temp": round(temp,1), "Dewp": round(dewp,1)})
     return profile
 
+# --- NEW: RADAR SITES & CACHING ---
+RADAR_SITES = {
+    "KMOB (Mobile)": (30.67, -88.24),
+    "KLIX (New Orleans)": (30.33, -89.82),
+    "KEVX (Eglin AFB)": (30.56, -85.92)
+}
+
+@st.cache_data
+def get_cached_radar_grid(l_lat, l_lon, p, nyquist, res_steps, radar_site_coords, use_radar_rel, erc_params):
+    lats = np.linspace(l_lat-2.5, l_lat+2.5, res_steps)
+    lons = np.linspace(l_lon-3.0, l_lon+3.0, int(res_steps * 1.2))
+    grid_data = []
+    for lt in lats:
+        for ln in lons:
+            dbz, vel, surge, prob = get_synthetic_products(lt, ln, l_lat, l_lon, p, nyquist, erc_params)
+            if use_radar_rel:
+                w, wd, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
+                angle_to_radar = np.arctan2((ln - radar_site_coords[1])*53, (lt - radar_site_coords[0])*69)
+                vel = w * np.cos(np.radians(wd) - angle_to_radar)
+                vel = ((vel + nyquist) % (2 * nyquist)) - nyquist
+            grid_data.append({"lat": lt, "lon": ln, "dbz": dbz, "vel": vel, "surge": surge, "prob": prob})
+    return grid_data, lats[1]-lats[0], lons[1]-lons[0]
+
 # --- 2. STREAMLIT UI ---
 st.set_page_config(layout="wide", page_title="LHIM | Alpha")
 
@@ -159,81 +190,93 @@ def add_legend(m, mode):
 
 with st.sidebar:
     st.title("🛡️ LHIM Alpha")
-    with st.expander("📡 Sensors & Climatology", expanded=True):
+    with st.expander("📡 Sensors & Performance", expanded=True):
         month = st.selectbox("Month", ["June", "July", "August", "September", "October", "November"], index=3)
         p_sst = get_sst_mult(month)
         radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
-        nyquist = st.slider("Nyquist Limit", 30, 100, 65)
-        radar_alpha = st.slider("Layer Opacity", 0.1, 1.0, 0.65)
+        radar_site = st.selectbox("Radar Site", list(RADAR_SITES.keys()))
+        use_radar_rel = st.toggle("Radar-Relative Velocity", value=False)
+        res_mode = st.selectbox("Resolution", ["Low (35x)", "Standard (55x)", "High (80x)"], index=1)
+        res_steps = {"Low (35x)": 35, "Standard (55x)": 55, "High (80x)": 80}[res_mode]
+        radar_alpha = st.slider("Opacity", 0.1, 1.0, 0.65)
+        nyquist = st.slider("Nyquist", 30, 100, 65)
+
     st.header("1. Core Parameters")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     f_speed = st.slider("Forward Speed (mph)", 2, 40, 12)
     f_dir = st.slider("Heading (Deg)", 0, 360, 330)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
+
+    with st.expander("🌀 Storm Structure & ERC"):
+        eyewall_org = st.slider("Organization", 0.0, 1.0, 1.0)
+        erc_active = st.toggle("Active ERC")
+        erc_strength = st.slider("Outer Ring Strength", 0.0, 1.0, 0.7) if erc_active else 0
+        erc_params = {'active': erc_active, 'strength': erc_strength}
+
     st.header("2. Environment")
     rh, outflow, symmetry = st.slider("Humidity", 30, 100, 85), st.slider("Outflow", 0.0, 1.0, 0.8), st.slider("Symmetry", 0.0, 1.0, 0.85)
     shear_mag, shear_dir = st.slider("Shear (kts)", 0, 60, 8), st.slider("Shear From", 0, 360, 260)
     l_lat, l_lon = st.number_input("Landfall Lat", value=30.35), st.number_input("Landfall Lon", value=-88.15)
     map_theme = st.selectbox("Theme", ["Dark Mode", "Light Mode"])
 
-p = [v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, p_sst]
+p = [v_max * eyewall_org, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, p_sst]
 
 # --- 3. MAPPING ---
 c1, c2 = st.columns([4, 1.5])
 with c1:
     m = folium.Map(location=[l_lat, l_lon], zoom_start=9, tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap")
     add_legend(m, radar_view)
-    radar_group = folium.FeatureGroup(name="LHIM Layers")
-    lats, lons = np.linspace(l_lat-2.5, l_lat+2.5, 55), np.linspace(l_lon-3.0, l_lon+3.0, 65)
-    d_lat, d_lon = lats[1]-lats[0], lons[1]-lons[0]
-    for lt in lats:
-        for ln in lons:
-            dbz, vel, surge, prob = get_synthetic_products(lt, ln, l_lat, l_lon, p, nyquist)
-            color = None
-            if radar_view == "Reflectivity (dBZ)" and dbz > 15:
-                color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00' if dbz > 20 else '#0000ff'
-            elif radar_view == "Velocity (kts)":
-                v_norm = np.clip(vel / nyquist, -1, 1)
-                color = '#ff0000' if v_norm > 0.6 else '#ff9999' if v_norm > 0 else '#99ff99' if v_norm > -0.6 else '#00aa00'
-            elif radar_view == "Storm Surge" and surge > 1.5:
-                color = '#330066' if surge > 12 else '#0033ff' if surge > 6 else '#00ffff'
-            elif radar_view == "Wind Prob." and prob > 20:
-                color = '#800000' if prob > 80 else '#ff3300' if prob > 50 else '#ffcc00'
-            if color:
-                folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_color=color, fill_opacity=radar_alpha, weight=0).add_to(radar_group)
-    radar_group.add_to(m)
-    for lt in np.linspace(l_lat-1.2, l_lat+1.2, 12):
-        for ln in np.linspace(l_lon-1.5, l_lon+1.5, 12):
-            w, _, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
-            if w > 35:
-                folium.CircleMarker(location=[lt, ln], radius=w/8, color='white', fill=True, weight=1, fill_opacity=0.3,
-                                    popup=folium.Popup(get_local_conditions(lt, ln, l_lat, l_lon, p), max_width=200)).add_to(m)
+    
+    # Layer Groups
+    fg_radar = folium.FeatureGroup(name="Reflectivity").add_to(m)
+    fg_vel = folium.FeatureGroup(name="Velocity").add_to(m)
+    fg_surge = folium.FeatureGroup(name="Surge/Prob").add_to(m)
+
+    data_grid, d_lat, d_lon = get_cached_radar_grid(l_lat, l_lon, p, nyquist, res_steps, RADAR_SITES[radar_site], use_radar_rel, erc_params)
+
+    for cell in data_grid:
+        lt, ln = cell['lat'], cell['lon']
+        color = None
+        if radar_view == "Reflectivity (dBZ)" and cell['dbz'] > 15:
+            color = '#ff0000' if cell['dbz'] > 50 else '#ff9900' if cell['dbz'] > 40 else '#ffff00' if cell['dbz'] > 30 else '#00ff00' if cell['dbz'] > 20 else '#0000ff'
+            folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=radar_alpha, weight=0).add_to(fg_radar)
+        elif radar_view == "Velocity (kts)":
+            v_norm = np.clip(cell['vel'] / nyquist, -1, 1)
+            color = '#ff0000' if v_norm > 0.6 else '#ff9999' if v_norm > 0 else '#99ff99' if v_norm > -0.6 else '#00aa00'
+            folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=radar_alpha, weight=0).add_to(fg_vel)
+        elif radar_view == "Storm Surge" and cell['surge'] > 1.5:
+            color = '#330066' if cell['surge'] > 12 else '#0033ff' if cell['surge'] > 6 else '#00ffff'
+            folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=radar_alpha, weight=0).add_to(fg_surge)
+
+    folium.LayerControl().add_to(m)
     last_click = st_folium(m, width="100%", height=750, key="lhim_alpha_map")
 
 with c2:
-    st.subheader("📍 Conditions Tracker")
+    st.subheader("📍 Point Inspector")
     if last_click and last_click.get("last_clicked"):
         clat, clon = last_click["last_clicked"]["lat"], last_click["last_clicked"]["lng"]
-        pdf = pd.DataFrame(get_vertical_profile(clat, clon, l_lat, l_lon, p))
-        st.caption(f"Sampling: {clat:.2f}, {clon:.2f}")
+        idbz, ivel, isurge, iprob = get_synthetic_products(clat, clon, l_lat, l_lon, p, nyquist, erc_params)
+        iw, iwd, _ = calculate_full_physics(clat, clon, l_lat, l_lon, p)
+        dist = np.sqrt(((clon-l_lon)*53)**2 + ((clat-l_lat)*69)**2)
         
-        # New Hourly Forecast Option
-        with st.expander("🕒 View 6-Hour Hourly Forecast", expanded=False):
+        st.markdown(f"""
+        <div style="background:#1e1e1e; padding:15px; border-radius:10px; border-left: 5px solid #ff4b4b;">
+            <b>Point:</b> {clat:.2f}, {clon:.2f}<br>
+            <b>Reflectivity:</b> {idbz:.1f} dBZ<br>
+            <b>Velocity:</b> {ivel:.1f} kts | <b>Surge:</b> {isurge:.1f} ft<br>
+            <b>Wind:</b> {iw:.1f} kts ({iw*1.15:.1f} mph) {get_wind_arrow(iwd)}<br>
+            <b>Dist from Eye:</b> {dist:.1f} miles
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.expander("🕒 6-Hour Forecast", expanded=True):
             h_data = get_hourly_forecast(clat, clon, l_lat, l_lon, p)
             for row in h_data:
-                st.markdown(f"""
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px; border-bottom: 1px solid #333;">
-                    <span style="font-weight: bold; width: 40px;">{row['Hour']}</span>
-                    <span style="font-size: 1.2em; width: 30px;">{row['Icon']}</span>
-                    <span style="color: {row['Color']}; font-weight: bold; width: 80px;">{row['Wind (mph)']} mph</span>
-                    <span style="font-size: 1.1em;">{row['Direction']}</span>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"<div style='display:flex; justify-content:space-between;'><span>{row['Hour']} {row['Icon']}</span> <b style='color:{row['Color']}'>{row['Wind (mph)']} mph</b> <span>{row['Direction']}</span></div>", unsafe_allow_html=True)
 
-        st.table(pdf.set_index('Level'))
-        st.line_chart(pdf[['Temp', 'Dewp']])
+        st.table(pd.DataFrame(get_vertical_profile(clat, clon, l_lat, l_lon, p)).set_index('Level'))
     else:
-        st.info("Click any marker to track local conditions.")
+        st.info("Click map to inspect data.")
+        
     st.metric("SST Influence", f"{month}", f"{p_sst:.2f}x")
     st.progress(min(max((v_max/160) * symmetry, 0.0), 1.0))
-    st.caption("Intensity Efficiency Profile")
