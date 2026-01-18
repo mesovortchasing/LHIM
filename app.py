@@ -45,6 +45,8 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000):
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
 
     total_wind = (v_sym * shear_effect) + v_forward
+
+    # Existing IR "weight" proxy (0..~1): keep this as-is
     ir_w = np.exp(-r / (r_max * 6.0)) * (rh / 100) * (0.7 + max(0, np.sin(r/12 - angle*2.5)*0.4))
 
     return max(0, total_wind), np.degrees(wind_angle_rad), ir_w
@@ -145,6 +147,134 @@ def get_vertical_profile(lat, lon, s_lat, s_lon, p):
         profile.append({"Level": lvl, "Wind": int(w), "Barb": get_wind_arrow(wd), "Temp": round(temp,1), "Dewp": round(dewp,1)})
     return profile
 
+# --- NEW: LIQUID SIMSAT (SYNTHETIC IR) ---
+def get_simsat_ir_c(lat, lon, s_lat, s_lon, p, erc_params=None):
+    """
+    Synthetic IR brightness temperature (°C), "liquid physics" style:
+    - Warm surface background tied to SST season multiplier
+    - Colder cloud tops scale with moisture/outflow/symmetry and storm structure (eyewall/bands)
+    - Eye remains warmer (subsidence + low cloud)
+    - Updates naturally as center moves because (s_lat,s_lon) changes -> new frames
+    """
+    v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
+
+    dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
+    r = np.sqrt(dx**2 + dy**2)
+    angle = np.arctan2(dy, dx)
+    if r < 1: r = 1
+
+    # Background "ocean skin temp" (°C) from season multiplier
+    # (kept simple & stable; you can refine later)
+    sst_c = 27.0 + (sst_mult - 1.0) * 6.0
+
+    # Storm structure terms (eyewall + bands) like your radar logic, but used for cloud-top cooling
+    eyewall = np.exp(-((r - r_max) ** 2) / (r_max * 0.28) ** 2)
+
+    # Outer ring boosts cooling during ERC (secondary convection)
+    if erc_params and erc_params.get("active", False):
+        outer_r_pos = r_max * 2.8
+        outer = (erc_params.get("strength", 0.7)) * np.exp(-((r - outer_r_pos) ** 2) / (r_max * 0.7) ** 2)
+    else:
+        outer = 0.0
+
+    # Spiral rainbands proxy (0..1)
+    bands_raw = np.sin(r / (r_max * 0.7) - angle * 2.6)
+    bands = np.clip(bands_raw, 0.0, 1.0) * np.exp(-r / (r_max * 7.0))
+
+    # Shear displacement: shift convective max downshear (adds realism)
+    shear_rad = np.radians(shear_dir)
+    shear_norm = np.clip(shear_mag / 40.0, 0.0, 1.0)
+    downshear_weight = 0.6 + 0.4 * np.cos(angle - (shear_rad + np.pi))  # downshear side
+    downshear_weight = np.clip(downshear_weight, 0.2, 1.0)
+
+    # Motion asymmetry (front-right enhancement)
+    motion_rad = np.radians(f_dir)
+    front_right = 0.7 + 0.3 * np.cos(angle - (motion_rad - np.pi / 4))
+    front_right = np.clip(front_right, 0.3, 1.0)
+
+    # Use existing IR "weight" as moisture/structure texture
+    _, _, ir_w = calculate_full_physics(lat, lon, s_lat, s_lon, p)
+
+    # Environment "liquid" factor: moisture + outflow + symmetry
+    env = (rh / 100.0) * (0.55 + 0.9 * outflow) * (0.35 + 0.65 * symmetry)
+    env = np.clip(env, 0.0, 1.0)
+
+    # Combine into a cloud-top cooling potential (0..1-ish)
+    conv = (0.65 * eyewall + 0.25 * bands + 0.25 * outer)
+    conv *= (0.75 + 0.25 * ir_w)  # texture
+    conv *= (1.0 + 0.5 * shear_norm * downshear_weight) * front_right
+    conv *= env
+
+    # Eye warmth: keep center warmer and suppress convection inside inner core
+    eye_mask = np.clip(1.0 - (r / (r_max * 0.55)), 0.0, 1.0)  # 1 near center
+    conv *= (1.0 - 0.92 * eye_mask)
+
+    # Translate convection potential into brightness temperature
+    # Stronger storms -> colder tops, but bounded
+    intensity_norm = np.clip((v_max - 40) / 120.0, 0.0, 1.0)
+    cold_cap = -78.0 + 6.0 * (1.0 - intensity_norm)  # stronger -> closer to -78
+    warm_bg = sst_c - 2.0  # background "clear-sky" IR slightly cooler than SST
+
+    # Cooling magnitude up to ~55°C (so -55C to -80C range typical)
+    cool_mag = 18.0 + 42.0 * intensity_norm
+    tb = warm_bg - cool_mag * np.clip(conv, 0.0, 1.35)
+
+    # Eye can be warmer than surroundings:
+    tb = tb + 7.0 * eye_mask
+
+    # Clamp to plausible range
+    return float(np.clip(tb, cold_cap, 32.0))
+
+def simsat_ir_color(tb_c):
+    """
+    Enhanced IR-ish discrete palette.
+    Colder = brighter / more vivid.
+    """
+    # thresholds in °C (warm -> cold)
+    if tb_c > 20:   return "#1a1a1a"
+    if tb_c > 10:   return "#2b2b2b"
+    if tb_c > 0:    return "#3c3c3c"
+    if tb_c > -10:  return "#4e4e4e"
+    if tb_c > -20:  return "#6a5acd"   # slateblue
+    if tb_c > -30:  return "#4169e1"   # royalblue
+    if tb_c > -40:  return "#00bfff"   # deepskyblue
+    if tb_c > -50:  return "#00ff7f"   # springgreen
+    if tb_c > -60:  return "#ffff00"   # yellow
+    if tb_c > -70:  return "#ff9900"   # orange
+    return "#ff00ff"                   # magenta (very cold)
+
+def add_simsat_legend(m):
+    rows = [
+        (">20", "#1a1a1a"),
+        ("10", "#2b2b2b"),
+        ("0", "#3c3c3c"),
+        ("-10", "#4e4e4e"),
+        ("-20", "#6a5acd"),
+        ("-30", "#4169e1"),
+        ("-40", "#00bfff"),
+        ("-50", "#00ff7f"),
+        ("-60", "#ffff00"),
+        ("-70", "#ff9900"),
+        ("<=-70", "#ff00ff"),
+    ]
+    html = '''
+    <div style="position: fixed; top: 10px; right: 10px; width: 170px; z-index:9999;
+         background: rgba(0,0,0,0.82); color: white; padding: 10px; border-radius: 6px;
+         font-family: sans-serif; font-size: 12px; border: 1px solid #444;">
+      <b>SIMSAT IR (°C)</b><br>
+      <span style="color:#aaa;">Synthetic / Estimated</span><br><br>
+    '''
+    for lbl, c in rows:
+        html += f'''
+        <div style="display:flex; align-items:center; margin:2px 0;">
+          <div style="background:{c}; width:14px; height:12px; margin-right:6px; border:1px solid rgba(255,255,255,0.15);"></div>
+          <div style="width:54px;">{lbl}</div>
+          <div style="color:#aaa;">°C</div>
+        </div>
+        '''
+    html += "</div>"
+    m.get_root().html.add_child(folium.Element(html))
+
 # --- NEW: RADAR SITES & CACHING ---
 RADAR_SITES = {
     "KMOB (Mobile)": (30.67, -88.24),
@@ -160,12 +290,17 @@ def get_cached_radar_grid(l_lat, l_lon, p, nyquist, res_steps, radar_site_coords
     for lt in lats:
         for ln in lons:
             dbz, vel, surge, prob = get_synthetic_products(lt, ln, l_lat, l_lon, p, nyquist, erc_params)
+
+            # SIMSAT IR frame value (updates naturally if l_lat/l_lon changes)
+            ir_c = get_simsat_ir_c(lt, ln, l_lat, l_lon, p, erc_params)
+
             if use_radar_rel:
                 w, wd, _ = calculate_full_physics(lt, ln, l_lat, l_lon, p)
                 angle_to_radar = np.arctan2((ln - radar_site_coords[1])*53, (lt - radar_site_coords[0])*69)
                 vel = w * np.cos(np.radians(wd) - angle_to_radar)
                 vel = ((vel + nyquist) % (2 * nyquist)) - nyquist
-            grid_data.append({"lat": lt, "lon": ln, "dbz": dbz, "vel": vel, "surge": surge, "prob": prob})
+
+            grid_data.append({"lat": lt, "lon": ln, "dbz": dbz, "vel": vel, "surge": surge, "prob": prob, "ir_c": ir_c})
     return grid_data, lats[1]-lats[0], lons[1]-lons[0]
 
 # --- NEW: COLOR TABLES (VELOCITY BINS + RADARSCOPE-LIKE PALETTE) ---
@@ -257,13 +392,14 @@ def add_reflectivity_legend(m):
 # --- 2. STREAMLIT UI ---
 st.set_page_config(layout="wide", page_title="LHIM | Alpha")
 
-# (Legacy legend kept, but we’ll override for reflectivity/velocity for better bins)
+# (Legacy legend kept, but we’ll override for reflectivity/velocity/IR for better bins)
 def add_legend(m, mode):
     legends = {
         "Reflectivity (dBZ)": ("Reflectivity", ["#0000ff", "#00ff00", "#ffff00", "#ff9900", "#ff0000"], ["20", "30", "40", "50", "60+"]),
         "Velocity (kts)": ("Radial Vel", ["#00aa00", "#99ff99", "#ff9999", "#ff0000"], ["Toward", "-30", "+30", "Away"]),
         "Storm Surge": ("Surge (ft)", ["#00ffff", "#0033ff", "#330066"], ["1-5", "6-12", "15+"]),
-        "Wind Prob.": ("Prob (%)", ["#ffcc00", "#ff3300", "#800000"], ["20", "50", "80+"])
+        "Wind Prob.": ("Prob (%)", ["#ffcc00", "#ff3300", "#800000"], ["20", "50", "80+"]),
+        "SIMSAT IR (°C)": ("SIMSAT IR", ["#3c3c3c", "#00bfff", "#00ff7f", "#ffff00", "#ff00ff"], ["0", "-40", "-50", "-60", "-70"])
     }
     title, colors, labels = legends[mode]
     html = f'''
@@ -280,7 +416,10 @@ with st.sidebar:
     with st.expander("📡 Sensors & Performance", expanded=True):
         month = st.selectbox("Month", ["June", "July", "August", "September", "October", "November"], index=3)
         p_sst = get_sst_mult(month)
-        radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
+        radar_view = st.radio(
+            "Display Mode",
+            ["Reflectivity (dBZ)", "Velocity (kts)", "SIMSAT IR (°C)", "Storm Surge", "Wind Prob."]
+        )
         radar_site = st.selectbox("Radar Site", list(RADAR_SITES.keys()))
         use_radar_rel = st.toggle("Radar-Relative Velocity", value=False)
         res_mode = st.selectbox("Resolution", ["Low (35x)", "Standard (55x)", "High (80x)"], index=1)
@@ -323,17 +462,20 @@ with c1:
         tiles="CartoDB DarkMatter" if map_theme == "Dark Mode" else "OpenStreetMap"
     )
 
-    # Use improved legends for reflectivity/velocity; keep old for the other modes
+    # Use improved legends for reflectivity/velocity/IR; keep old for other modes
     if radar_view == "Reflectivity (dBZ)":
         add_reflectivity_legend(m)
     elif radar_view == "Velocity (kts)":
         add_velocity_legend(m, step=vel_step, vmax=vel_vmax)
+    elif radar_view == "SIMSAT IR (°C)":
+        add_simsat_legend(m)
     else:
         add_legend(m, radar_view)
 
     # Layer Groups
     fg_radar = folium.FeatureGroup(name="Reflectivity").add_to(m)
     fg_vel = folium.FeatureGroup(name="Velocity").add_to(m)
+    fg_ir = folium.FeatureGroup(name="SIMSAT IR").add_to(m)
     fg_surge = folium.FeatureGroup(name="Surge/Prob").add_to(m)
 
     data_grid, d_lat, d_lon = get_cached_radar_grid(
@@ -352,12 +494,18 @@ with c1:
             ).add_to(fg_radar)
 
         elif radar_view == "Velocity (kts)":
-            # NEW: Discrete Radarscope-like bins, fixed increments up to vel_vmax
             color = velocity_color_radarscope_like(cell['vel'], step=vel_step, vmax=vel_vmax)
             folium.Rectangle(
                 bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
                 color=color, fill=True, fill_opacity=radar_alpha, weight=0
             ).add_to(fg_vel)
+
+        elif radar_view == "SIMSAT IR (°C)":
+            color = simsat_ir_color(cell["ir_c"])
+            folium.Rectangle(
+                bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
+                color=color, fill=True, fill_opacity=radar_alpha, weight=0
+            ).add_to(fg_ir)
 
         elif radar_view == "Storm Surge" and cell['surge'] > 1.5:
             color = '#330066' if cell['surge'] > 12 else '#0033ff' if cell['surge'] > 6 else '#00ffff'
@@ -367,8 +515,7 @@ with c1:
             ).add_to(fg_surge)
 
         elif radar_view == "Wind Prob." and cell.get('prob', 0) > 20:
-            # Optional: show prob field (you had it as view option but not plotted in this block)
-            # Keeping it minimal; you can add a FeatureGroup if you want later.
+            # Optional: show prob field (keeping minimal, same as before)
             pass
 
     folium.LayerControl().add_to(m)
@@ -383,6 +530,7 @@ with c2:
             clat, clon = last_click["last_clicked"]["lat"], last_click["last_clicked"]["lng"]
             idbz, ivel, isurge, iprob = get_synthetic_products(clat, clon, l_lat, l_lon, p, nyquist, erc_params)
             iw, iwd, _ = calculate_full_physics(clat, clon, l_lat, l_lon, p)
+            ir_c = get_simsat_ir_c(clat, clon, l_lat, l_lon, p, erc_params)
             dist = np.sqrt(((clon - l_lon) * 53)**2 + ((clat - l_lat) * 69)**2)
 
             st.markdown(f"""
@@ -390,6 +538,7 @@ with c2:
                 <b>Point:</b> {clat:.2f}, {clon:.2f}<br>
                 <b>Reflectivity:</b> {idbz:.1f} dBZ<br>
                 <b>Velocity:</b> {ivel:.1f} kts | <b>Surge:</b> {isurge:.1f} ft<br>
+                <b>SIMSAT IR:</b> {ir_c:.1f} °C<br>
                 <b>Wind:</b> {iw:.1f} kts ({iw*1.15:.1f} mph) {get_wind_arrow(iwd)}<br>
                 <b>Dist from Eye:</b> {dist:.1f} miles
             </div>
@@ -415,7 +564,7 @@ with c2:
 
     with tab_ct:
         st.subheader("🎨 Color Tables")
-        st.caption("These are the discrete color bins used for Synthetic Radar layers.")
+        st.caption("These are the discrete color bins used for Synthetic layers.")
 
         st.markdown("### Reflectivity (dBZ)")
         for lbl, c in [("20–30", "#00ff00"), ("30–40", "#ffff00"), ("40–50", "#ff9900"), ("50+", "#ff0000")]:
@@ -429,7 +578,6 @@ with c2:
         st.markdown("---")
         st.markdown("### Velocity (kts) — Radarscope-like (Synthetic)")
         st.caption("Greens = toward radar (negative), Reds = away from radar (positive).")
-
         rows = build_velocity_legend_bins(step=vel_step, vmax=vel_vmax)
         for v, c in rows:
             label = "0" if v == 0 else f"{v:+d}"
@@ -438,5 +586,30 @@ with c2:
                 f"<div style='width:20px; height:12px; background:{c}; border:1px solid #333;'></div>"
                 f"<div style='width:50px;'>{label}</div>"
                 f"<div style='color:#888;'>kts</div></div>",
+                unsafe_allow_html=True
+            )
+
+        st.markdown("---")
+        st.markdown("### SIMSAT IR (°C) — Enhanced IR (Synthetic)")
+        st.caption("Colder cloud tops = brighter colors. Warm eye/background = darker.")
+        sim_rows = [
+            (">20", "#1a1a1a"),
+            ("10", "#2b2b2b"),
+            ("0", "#3c3c3c"),
+            ("-10", "#4e4e4e"),
+            ("-20", "#6a5acd"),
+            ("-30", "#4169e1"),
+            ("-40", "#00bfff"),
+            ("-50", "#00ff7f"),
+            ("-60", "#ffff00"),
+            ("-70", "#ff9900"),
+            ("<=-70", "#ff00ff"),
+        ]
+        for lbl, c in sim_rows:
+            st.markdown(
+                f"<div style='display:flex; align-items:center; gap:8px; margin:3px 0;'>"
+                f"<div style='width:20px; height:12px; background:{c}; border:1px solid #333;'></div>"
+                f"<div style='width:60px;'>{lbl}</div>"
+                f"<div style='color:#888;'>°C</div></div>",
                 unsafe_allow_html=True
             )
