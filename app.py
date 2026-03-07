@@ -83,13 +83,13 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
 if 'active_radar' not in st.session_state: st.session_state.active_radar = "KMOB"
 if 'loop_idx' not in st.session_state: st.session_state.loop_idx = 0
 RADAR_SITES = {"KMOB": (30.67, -88.24), "KLIX": (30.33, -89.82), "KEVX": (30.56, -85.92)}
-geolocator = Nominatim(user_agent="lhim_weather_app")
+geolocator = Nominatim(user_agent="lhim_weather_app_v29")
 
 # --- 3. UI & SIDEBAR ---
-st.set_page_config(layout="wide", page_title="LHIM v2.8 | Weather Channel Edition")
+st.set_page_config(layout="wide", page_title="LHIM v2.9 | Devastating Impact Mode")
 
 with st.sidebar:
-    st.title("🛡️ LHIM v2.8")
+    st.title("🛡️ LHIM v2.9")
     radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
     
     with st.expander("⚠️ Warning Settings", expanded=False):
@@ -155,20 +155,19 @@ with c1:
     map_data = st_folium(m, width="100%", height=750, key=f"map_{st.session_state.loop_idx}", returned_objects=["last_clicked"])
 
 with c2:
-    st.markdown("""<style> .weather-card { background-color: #003366; color: white; padding: 20px; border-radius: 10px; border-left: 10px solid #ffcc00; } </style>""", unsafe_allow_html=True)
+    st.markdown("""<style> .weather-card { background-color: #003366; color: white; padding: 20px; border-radius: 10px; border-left: 10px solid #ffcc00; } 
+    .forecast-text { font-size: 0.85rem; color: #aaddff; line-height: 1.2; } </style>""", unsafe_allow_html=True)
     
     if map_data and map_data.get("last_clicked"):
         clat, clon = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
         
-        # 1. Location Lookup
         try:
             location = geolocator.reverse(f"{clat}, {clon}", timeout=3)
             address = location.raw['address']
-            loc_name = f"{address.get('city', address.get('town', 'Coastal Point'))}, {address.get('state', 'Gulf Coast')}"
+            loc_name = f"{address.get('city', address.get('town', 'Coastal Point'))}, {address.get('state', 'USA')}"
         except:
-            loc_name = "Offshore / Unincorporated Area"
+            loc_name = f"Grid {clat:.2f}, {clon:.2f}"
 
-        # 2. Current Conditions (Now)
         dbz, vel, surge, _ = get_synthetic_products(clat, clon, current_lat, current_lon, p, radar_coords, front_lat=front_lat)
         w_kts, wd, r = calculate_full_physics(clat, clon, current_lat, current_lon, p, front_lat=front_lat)
         
@@ -186,27 +185,52 @@ with c2:
         k2.metric("GUST", f"{int(gust)} KT")
         
         st.divider()
-        st.subheader("⏱️ 6-Hour Hyper-Local Forecast")
+        st.subheader("⏱️ 6-Hour Impact Forecast")
         
-        forecast_data = []
+        forecast_rows = []
         for hour in range(1, 7):
-            # Move storm forward based on parameters to predict future impacts at this specific click point
             f_dist = (f_speed * hour) / 69.0
-            future_lat = current_lat + (f_dist * np.cos(np.radians(f_dir)))
-            future_lon = current_lon + (f_dist * np.sin(np.radians(f_dir)))
+            # Projecting storm movement
+            f_lat = current_lat + (f_dist * np.cos(np.radians(f_dir)))
+            f_lon = current_lon + (f_dist * np.sin(np.radians(f_dir)))
             
-            f_dbz, _, f_surge, _ = get_synthetic_products(clat, clon, future_lat, future_lon, p, front_lat=front_lat)
-            f_w, _, _ = calculate_full_physics(clat, clon, future_lat, future_lon, p, front_lat=front_lat)
-            
-            cond = "Heavy Rain" if f_dbz > 45 else "Tropical Rain" if f_dbz > 25 else "Overcast"
-            forecast_data.append({"Hour": f"+{hour}h", "Wind (kt)": int(f_w), "Surge (ft)": round(f_surge, 1), "Condition": cond})
+            f_dbz, _, f_surge, _ = get_synthetic_products(clat, clon, f_lat, f_lon, p, front_lat=front_lat)
+            f_w, _, f_r = calculate_full_physics(clat, clon, f_lat, f_lon, p, front_lat=front_lat)
+            f_gust = f_w * (1.35 if f_w > 90 else 1.2)
+
+            # Intensity Specific Descriptors
+            if f_w > 115: w_desc = "DEVASTATING"
+            elif f_w > 95: w_desc = "EXTREME"
+            elif f_w > 64: w_desc = "HURRICANE"
+            elif f_w > 34: w_desc = "TROPICAL STORM"
+            elif f_w > 20: w_desc = "BREEZY"
+            else: w_desc = "LIGHT WINDS"
+
+            # Situational Condition Logic
+            if f_r < r_max * 1.2: 
+                cond = f"EYEWALL: {w_desc} WINDS"
+            elif f_dbz > 50:
+                cond = f"TORRENTIAL: {w_desc} WINDS"
+            elif f_surge > 4:
+                cond = f"SURGE THREAT: {w_desc}"
+            else:
+                cond = f"{w_desc} / RAIN"
+
+            forecast_rows.append({
+                "Time": f"T+{hour}h",
+                "Condition": cond,
+                "Peak Gust": f"{int(f_gust)} KT",
+                "Surge": f"{f_surge:.1f} FT"
+            })
         
-        st.table(pd.DataFrame(forecast_data))
+        st.dataframe(pd.DataFrame(forecast_rows), hide_index=True)
         
         if surge > 6:
-            st.warning(f"URGENT: STROM SURGE INUNDATION OF {surge:.1f}ft EXPECTED")
+            st.error(f"🚨 CRITICAL SURGE WARNING: Life-threatening inundation of {surge:.1f}ft is occurring or imminent. Seek higher ground.")
+        elif w_kts > 64:
+            st.warning(f"🌬️ HURRICANE FORCE WINDS: Structural damage possible. Stay indoors away from windows.")
     else:
-        st.info("🛰️ Select a location on the map to initialize the Weather Channel Forecast Dashboard.")
+        st.info("🛰️ Click map to initialize the Impact Dashboard.")
 
 if run_loop:
     time.sleep(0.05)
