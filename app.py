@@ -5,6 +5,7 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 import time
+from geopy.geocoders import Nominatim # Added for City/State lookup
 
 # --- 1. CORE PHYSICS & RADAR ENGINE ---
 
@@ -70,12 +71,9 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
         aliased_v = np.clip(radial_v, -149, 149)
     else: aliased_v = 0
 
-    # Hyper-Realistic Surge Physics
     surge = 0
-    if 30.00 <= lat <= 30.55: # Expanded coastal shelf
+    if 30.00 <= lat <= 30.55: 
         dist_mult = np.exp(-abs(lat - 30.25) * 5)
-        # Surge peaks on the right side (onshore flow)
-        onshore_factor = np.sin(np.radians(wd) - np.arctan2(0, 1)) # Relative to north/south coast
         surge = (w**1.9 / 1700) * (1.8 if lon > s_lon else -0.5) * dist_mult
     
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
@@ -85,12 +83,13 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
 if 'active_radar' not in st.session_state: st.session_state.active_radar = "KMOB"
 if 'loop_idx' not in st.session_state: st.session_state.loop_idx = 0
 RADAR_SITES = {"KMOB": (30.67, -88.24), "KLIX": (30.33, -89.82), "KEVX": (30.56, -85.92)}
+geolocator = Nominatim(user_agent="lhim_weather_app")
 
 # --- 3. UI & SIDEBAR ---
-st.set_page_config(layout="wide", page_title="LHIM v2.7 | Advanced Surge")
+st.set_page_config(layout="wide", page_title="LHIM v2.8 | Weather Channel Edition")
 
 with st.sidebar:
-    st.title("🛡️ LHIM v2.7")
+    st.title("🛡️ LHIM v2.8")
     radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
     
     with st.expander("⚠️ Warning Settings", expanded=False):
@@ -123,8 +122,8 @@ current_lat = l_lat - (dist_back * np.cos(np.radians(f_dir)))
 current_lon = l_lon - (dist_back * np.sin(np.radians(f_dir)))
 p = [v_max, r_max, f_speed, f_dir, shear_mag, 240, rh, 0.8, 0.85, get_sst_mult("September", sst_boost)]
 
-# --- 4. MAP ---
-c1, c2 = st.columns([4, 1.5])
+# --- 4. MAP & DASHBOARD ---
+c1, c2 = st.columns([4, 1.8])
 with c1:
     m = folium.Map(location=[l_lat, l_lon], zoom_start=8, tiles="CartoDB DarkMatter")
     radar_coords = RADAR_SITES[st.session_state.active_radar]
@@ -143,42 +142,71 @@ with c1:
                 if vel < -5: color = '#00ffff' if vel < -110 else '#00ccff' if vel < -75 else '#00aa00'
                 elif vel > 5: color = '#ff00ff' if vel > 110 else '#ff0000' if vel > 75 else '#880000'
             elif radar_view == "Storm Surge" and abs(surge) > 0.5:
-                # Dynamic Surge Palette 
-                if surge > 12: color = '#4b0082' # Extreme (Purple)
-                elif surge > 9: color = '#8b0000' # Critical (Dark Red)
-                elif surge > 6: color = '#ff0000' # Life-Threatening (Red)
-                elif surge > 3: color = '#ff8c00' # Major (Orange)
-                elif surge > 0: color = '#ffd700' # Moderate (Yellow)
-                else: color = '#00ced1' # Recession (Cyan)
+                if surge > 12: color = '#4b0082' 
+                elif surge > 9: color = '#8b0000' 
+                elif surge > 6: color = '#ff0000' 
+                elif surge > 3: color = '#ff8c00' 
+                elif surge > 0: color = '#ffd700' 
+                else: color = '#00ced1' 
             
             if color:
                 folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.6, weight=0).add_to(m)
-                if show_warnings and surge > surge_threshold:
-                    folium.CircleMarker(location=[lt, ln], radius=2, color="white", weight=1).add_to(m)
 
-    map_data = st_folium(m, width="100%", height=720, key=f"map_{st.session_state.loop_idx}", returned_objects=["last_clicked"])
+    map_data = st_folium(m, width="100%", height=750, key=f"map_{st.session_state.loop_idx}", returned_objects=["last_clicked"])
 
 with c2:
-    st.subheader("📊 Dynamic Inspection")
+    st.markdown("""<style> .weather-card { background-color: #003366; color: white; padding: 20px; border-radius: 10px; border-left: 10px solid #ffcc00; } </style>""", unsafe_allow_html=True)
+    
     if map_data and map_data.get("last_clicked"):
         clat, clon = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
+        
+        # 1. Location Lookup
+        try:
+            location = geolocator.reverse(f"{clat}, {clon}", timeout=3)
+            address = location.raw['address']
+            loc_name = f"{address.get('city', address.get('town', 'Coastal Point'))}, {address.get('state', 'Gulf Coast')}"
+        except:
+            loc_name = "Offshore / Unincorporated Area"
+
+        # 2. Current Conditions (Now)
         dbz, vel, surge, _ = get_synthetic_products(clat, clon, current_lat, current_lon, p, radar_coords, front_lat=front_lat)
         w_kts, wd, r = calculate_full_physics(clat, clon, current_lat, current_lon, p, front_lat=front_lat)
         
-        # Localized Weather Physics
         t_base = 84 if sst_boost else 80
         local_temp = t_base - (r * 0.08) - (dbz * 0.1)
         local_dewp = local_temp - (100 - rh) * 0.15
         gust = w_kts * (1.35 if w_kts > 90 else 1.22)
 
-        st.metric("Sustained Wind", f"{int(w_kts)} kts", f"{int(gust)} kts Gust")
-        st.metric("Storm Surge", f"{surge:.1f} ft", delta_color="inverse" if surge > 6 else "normal")
-        st.metric("Ambient Temp", f"{local_temp:.1f}°F", f"Dew: {local_dewp:.1f}°F")
-        st.write(f"**Reflectivity:** {dbz:.1f} dBZ")
-        if surge > surge_threshold:
-            st.error(f"⚠️ LIFE-THREATENING SURGE INUNDATION AT THIS LOCATION")
+        st.markdown(f"<div class='weather-card'><h2>📍 {loc_name}</h2><h3>CURRENT CONDITIONS</h3></div>", unsafe_allow_html=True)
+        
+        k1, k2 = st.columns(2)
+        k1.metric("TEMP", f"{int(local_temp)}°F")
+        k1.metric("DEW PT", f"{int(local_dewp)}°F")
+        k2.metric("WIND", f"{int(w_kts)} KT")
+        k2.metric("GUST", f"{int(gust)} KT")
+        
+        st.divider()
+        st.subheader("⏱️ 6-Hour Hyper-Local Forecast")
+        
+        forecast_data = []
+        for hour in range(1, 7):
+            # Move storm forward based on parameters to predict future impacts at this specific click point
+            f_dist = (f_speed * hour) / 69.0
+            future_lat = current_lat + (f_dist * np.cos(np.radians(f_dir)))
+            future_lon = current_lon + (f_dist * np.sin(np.radians(f_dir)))
+            
+            f_dbz, _, f_surge, _ = get_synthetic_products(clat, clon, future_lat, future_lon, p, front_lat=front_lat)
+            f_w, _, _ = calculate_full_physics(clat, clon, future_lat, future_lon, p, front_lat=front_lat)
+            
+            cond = "Heavy Rain" if f_dbz > 45 else "Tropical Rain" if f_dbz > 25 else "Overcast"
+            forecast_data.append({"Hour": f"+{hour}h", "Wind (kt)": int(f_w), "Surge (ft)": round(f_surge, 1), "Condition": cond})
+        
+        st.table(pd.DataFrame(forecast_data))
+        
+        if surge > 6:
+            st.warning(f"URGENT: STROM SURGE INUNDATION OF {surge:.1f}ft EXPECTED")
     else:
-        st.info("Click the map to analyze localized surge and weather data.")
+        st.info("🛰️ Select a location on the map to initialize the Weather Channel Forecast Dashboard.")
 
 if run_loop:
     time.sleep(0.05)
