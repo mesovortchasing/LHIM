@@ -31,10 +31,8 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     B = 1.3 + (eff_v / 150)
     v_sym = eff_v * np.sqrt((r_max / r)**B * np.exp(1 - (r_max / r)**B))
     
-    # Mesovort Injection (Fluid Microphysics)
     mv_bonus = 0
     if micro_scale > 0 and abs(r - r_max) < (r_max * 0.4):
-        # Create 4 orbiting mesovorts
         for i in range(4):
             mv_angle = (time.time() * 0.5) + (i * np.pi / 2)
             mv_x = r_max * np.cos(mv_angle)
@@ -45,7 +43,6 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     inflow = 25 if level > 500 else -30
     wind_angle_rad = angle + (np.pi / 2) + np.radians(inflow if r > r_max else inflow/2)
     
-    # Keep your exact shear and forward speed math
     shear_rad = np.radians(shear_dir)
     shear_effect = 1 + ((1.0 - symmetry) * (shear_mag / 40)) * np.cos(angle - shear_rad)
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
@@ -57,11 +54,10 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, active_radar_c
     w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, micro_scale=micro_scale)
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
     
-    # Reflectivity logic with Mesovort Enhancement + Fuller Shield
     eyewall = 60 * np.exp(-((r - r_max)**2) / (r_max * 0.25)**2)
-    shield = 35 * np.exp(-r / (r_max * 4.0)) # Added this to make it "fuller"
+    shield = 35 * np.exp(-r / (r_max * 4.0)) 
     if micro_scale > 0:
-        eyewall *= (1 + (micro_scale * 0.3 * np.sin(angle * 5))) # Granular texture
+        eyewall *= (1 + (micro_scale * 0.3 * np.sin(angle * 5))) 
         
     bands = max(0, np.sin(r / (r_max * 0.7) - angle * 2.5) * 40 * np.exp(-r / 150))
     dbz = (max(eyewall, shield) + bands + 18) * (rh / 100) * symmetry
@@ -70,7 +66,6 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, active_radar_c
     if active_radar_coords:
         rdx, rdy = (lon - active_radar_coords[1]) * 53, (lat - active_radar_coords[0]) * 69
         angle_to_radar = np.arctan2(rdy, rdx)
-        # Using 1.15 to convert kts to mph for your +/- 149 request
         radial_v = (w * 1.15) * np.cos(np.radians(wd) - angle_to_radar)
         aliased_v = np.clip(radial_v, -149, 149)
     else:
@@ -79,7 +74,6 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, active_radar_c
     surge = 0
     is_coastal = 30.10 <= lat <= 30.45 
     if is_coastal:
-        # RIGHT SIDE (lon > s_lon) gets surge; LEFT SIDE gets recession
         surge_mult = 1.4 if lon > s_lon else -0.8
         surge = (w**2 / 2000) * surge_mult
     
@@ -105,8 +99,8 @@ with st.sidebar:
     radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
     
     with st.expander("🌀 Advanced Physics", expanded=True):
-        micro_scale = st.slider("Microphysics Scale", 0.0, 1.0, 0.4, help="Adds fluid mesovorts and granular precipitation physics.")
-        time_offset = st.slider("Radar Loop (Hours Ago)", 0, 12, 0, help="Rewind the storm position based on current motion vectors.")
+        micro_scale = st.slider("Microphysics Scale", 0.0, 1.0, 0.4)
+        time_offset = st.slider("Radar Loop (Hours Ago)", 0, 12, 0)
         
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
@@ -116,7 +110,6 @@ with st.sidebar:
     l_lat, l_lon = st.number_input("Landfall Lat", value=30.35), st.number_input("Landfall Lon", value=-88.15)
     res_steps = st.select_slider("Performance / Quality", options=[30, 45, 60], value=45)
 
-# Calculate temporal storm center
 dist_back = (f_speed * time_offset) / 69.0
 move_rad = np.radians(f_dir)
 current_lat = l_lat - (dist_back * np.cos(move_rad))
@@ -147,15 +140,11 @@ with c1:
         for ln in lons:
             dbz, vel, surge, prob = get_synthetic_products(lt, ln, current_lat, current_lon, p, 149, radar_coords, micro_scale)
             color = None
-            
             if radar_view == "Reflectivity (dBZ)" and dbz > 18:
                 color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00'
             elif radar_view == "Velocity (kts)":
-                # Realistic Inbound/Outbound RadarScope logic
-                if vel < -5:
-                    color = '#00ffff' if vel < -100 else '#0055ff' if vel < -60 else '#00aa00'
-                elif vel > 5:
-                    color = '#ff00ff' if vel > 100 else '#ff0000' if vel > 60 else '#880000'
+                if vel < -5: color = '#00ffff' if vel < -100 else '#0055ff' if vel < -60 else '#00aa00'
+                elif vel > 5: color = '#ff00ff' if vel > 100 else '#ff0000' if vel > 60 else '#880000'
             elif radar_view == "Storm Surge" and abs(surge) > 1.2:
                 color = '#0033ff' if surge > 0 else '#ffcc00'
             elif radar_view == "Wind Prob." and prob > 0:
@@ -164,20 +153,14 @@ with c1:
             if color:
                 folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.6, weight=0).add_to(m)
 
-    # ADDING DYNAMIC LEGEND
-    legend_html = f'''
-     <div style="position: fixed; bottom: 50px; left: 50px; width: 140px; height: 100px; 
-     background-color: white; border:2px solid grey; z-index:9999; font-size:12px; padding:10px;">
-     <b>{radar_view}</b><br>
-     Max: <span style="color:red">High</span><br>
-     Min: <span style="color:blue">Low</span>
-     </div>
-     '''
+    # DYNAMIC LEGEND
+    legend_html = f'''<div style="position: fixed; bottom: 50px; left: 50px; width: 140px; height: 100px; background-color: white; border:2px solid grey; z-index:9999; font-size:12px; padding:10px;"><b>{radar_view}</b><br>Max: <span style="color:red">High</span><br>Min: <span style="color:blue">Low</span></div>'''
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    map_data = st_folium(m, width="100%", height=750)
+    # Fix: Stable st_folium with key and returned_objects
+    map_data = st_folium(m, width="100%", height=750, key="radar_map", returned_objects=["last_clicked", "last_object_clicked_popup"])
 
-    if map_data.get("last_object_clicked_popup"):
+    if map_data and map_data.get("last_object_clicked_popup"):
         clicked_name = map_data["last_object_clicked_popup"].split(": ")[-1]
         if clicked_name in RADAR_SITES and clicked_name != st.session_state.active_radar:
             st.session_state.active_radar = clicked_name
@@ -185,21 +168,21 @@ with c1:
 
 with c2:
     st.subheader("📊 Microphysics Analysis")
-    st.info(f"Looping: **T-{time_offset}h** | Radar: **{st.session_state.active_radar}**")
-    
     if map_data and map_data.get("last_clicked"):
         clat, clon = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
         dbz, vel, surge, prob = get_synthetic_products(clat, clon, current_lat, current_lon, p, 149, radar_coords, micro_scale)
-        w, _, _ = calculate_full_physics(clat, clon, current_lat, current_lon, p, micro_scale=micro_scale)
+        w_kts, wd, r = calculate_full_physics(clat, clon, current_lat, current_lon, p, micro_scale=micro_scale)
         
-        st.metric("Point Wind", f"{int(w)} kts", f"{(micro_scale*w*0.15):+.1f} MV Effect")
+        # Calculations for Temp/Dewpoint/Gusts
+        temp = 82 - (r * 0.05) # Tropical environment cooling slightly away from eye
+        dewp = temp - (100 - rh) * 0.2
+        gust = w_kts * 1.25
+
+        st.write(f"**Location:** {clat:.3f}, {clon:.3f}")
+        st.metric("Point Wind / Gust", f"{int(w_kts)} kts", f"{int(gust)} kts Gust")
+        st.metric("Temperature / Dew Point", f"{temp:.1f}°F", f"{dewp:.1f}°F")
         st.metric("Radial Velocity", f"{int(vel)} mph")
         st.metric("Storm Surge", f"{surge:.1f} ft")
-        
-        st.write(f"**Vorticity Intensity:** {'High' if micro_scale > 0.7 else 'Moderate' if micro_scale > 0.3 else 'Low'}")
         st.write(f"**Reflectivity:** {dbz:.1f} dBZ")
     else:
-        st.write("Click map for point inspection.")
-
-    st.markdown("---")
-    st.caption(f"Micro-vortices enabled at {micro_scale*100}%. Storm center adjusted to T-{time_offset}h coordinates: {current_lat:.2f}, {current_lon:.2f}.")
+        st.info("Click the map to inspect location data.")
