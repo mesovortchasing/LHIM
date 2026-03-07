@@ -45,37 +45,33 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     inflow = 25 if level > 500 else -30
     wind_angle_rad = angle + (np.pi / 2) + np.radians(inflow if r > r_max else inflow/2)
     
+    # Keep your exact shear and forward speed math
     shear_rad = np.radians(shear_dir)
     shear_effect = 1 + ((1.0 - symmetry) * (shear_mag / 40)) * np.cos(angle - shear_rad)
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
     
     return max(0, (v_sym * shear_effect) + v_forward + mv_bonus), np.degrees(wind_angle_rad), r
 
-def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=149, active_radar_coords=None, micro_scale=0.0):
+def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, active_radar_coords=None, micro_scale=0.0):
     v_max, r_max, _, _, _, _, rh, _, symmetry, _ = p
     w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, micro_scale=micro_scale)
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
     
-    # --- ENHANCED REFLECTIVITY (Fuller Logic) ---
-    eyewall = 62 * np.exp(-((r - r_max)**2) / (r_max * 0.4)**2)
-    # Added "Shield" logic to fill the storm core
-    shield = 38 * np.exp(-r / (r_max * 3.5)) 
+    # Reflectivity logic with Mesovort Enhancement + Fuller Shield
+    eyewall = 60 * np.exp(-((r - r_max)**2) / (r_max * 0.25)**2)
+    shield = 35 * np.exp(-r / (r_max * 4.0)) # Added this to make it "fuller"
     if micro_scale > 0:
         eyewall *= (1 + (micro_scale * 0.3 * np.sin(angle * 5))) # Granular texture
         
     bands = max(0, np.sin(r / (r_max * 0.7) - angle * 2.5) * 40 * np.exp(-r / 150))
-    # Combined Eyewall, Shield, and Bands for a "Fuller" look
-    dbz = (max(eyewall, shield) + bands + 12) * (rh / 100) * symmetry
-    if r < r_max * 0.25: dbz *= 0.15 # Eye definition
+    dbz = (max(eyewall, shield) + bands + 18) * (rh / 100) * symmetry
+    if r < r_max * 0.35: dbz *= 0.1 
 
-    # --- FLUID VELOCITY (Fluid +/- 149 Logic) ---
     if active_radar_coords:
         rdx, rdy = (lon - active_radar_coords[1]) * 53, (lat - active_radar_coords[0]) * 69
         angle_to_radar = np.arctan2(rdy, rdx)
-        # Convert kts to mph for your +/- 149 range
-        w_mph = w * 1.15
-        radial_v = w_mph * np.cos(np.radians(wd) - angle_to_radar)
-        # Regular radar "aliasing" or fluid clipping
+        # Using 1.15 to convert kts to mph for your +/- 149 request
+        radial_v = (w * 1.15) * np.cos(np.radians(wd) - angle_to_radar)
         aliased_v = np.clip(radial_v, -149, 149)
     else:
         aliased_v = 0
@@ -83,7 +79,9 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=149, active_radar_
     surge = 0
     is_coastal = 30.10 <= lat <= 30.45 
     if is_coastal:
-        surge = (w**2 / 2000) * (1.4 if np.sin(angle) > 0 else 0.4)
+        # RIGHT SIDE (lon > s_lon) gets surge; LEFT SIDE gets recession
+        surge_mult = 1.4 if lon > s_lon else -0.8
+        surge = (w**2 / 2000) * surge_mult
     
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
 
@@ -132,7 +130,6 @@ c1, c2 = st.columns([4, 1.5])
 with c1:
     m = folium.Map(location=[l_lat, l_lon], zoom_start=8, tiles="CartoDB DarkMatter")
     
-    # Historical Track Line
     if time_offset > 0:
         folium.PolyLine([[current_lat, current_lon], [l_lat, l_lon]], color="white", weight=2, dash_array='5, 10', opacity=0.5).add_to(m)
 
@@ -153,21 +150,30 @@ with c1:
             
             if radar_view == "Reflectivity (dBZ)" and dbz > 18:
                 color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00'
-            
             elif radar_view == "Velocity (kts)":
-                # Regular Radar Coloring: Inbound (Green/Blue) vs Outbound (Red/Yellow)
-                if vel < -5: # Inbound
-                    color = '#003300' if vel < -100 else '#00aa00' if vel < -50 else '#99ff99'
-                elif vel > 5: # Outbound
-                    color = '#660000' if vel > 100 else '#ff0000' if vel > 50 else '#ff9999'
-
-            elif radar_view == "Storm Surge" and surge > 1.2:
-                color = '#330066' if surge > 10 else '#0033ff' if surge > 5 else '#00ffff'
+                # Realistic Inbound/Outbound RadarScope logic
+                if vel < -5:
+                    color = '#00ffff' if vel < -100 else '#0055ff' if vel < -60 else '#00aa00'
+                elif vel > 5:
+                    color = '#ff00ff' if vel > 100 else '#ff0000' if vel > 60 else '#880000'
+            elif radar_view == "Storm Surge" and abs(surge) > 1.2:
+                color = '#0033ff' if surge > 0 else '#ffcc00'
             elif radar_view == "Wind Prob." and prob > 0:
                 color = '#ff00ff' if prob >= 90 else '#ff6600' if prob >= 60 else '#ffff00'
 
             if color:
                 folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.6, weight=0).add_to(m)
+
+    # ADDING DYNAMIC LEGEND
+    legend_html = f'''
+     <div style="position: fixed; bottom: 50px; left: 50px; width: 140px; height: 100px; 
+     background-color: white; border:2px solid grey; z-index:9999; font-size:12px; padding:10px;">
+     <b>{radar_view}</b><br>
+     Max: <span style="color:red">High</span><br>
+     Min: <span style="color:blue">Low</span>
+     </div>
+     '''
+    m.get_root().html.add_child(folium.Element(legend_html))
 
     map_data = st_folium(m, width="100%", height=750)
 
