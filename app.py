@@ -12,11 +12,6 @@ def get_sst_mult(month):
     months = {"June": 0.85, "July": 0.92, "August": 1.05, "September": 1.15, "October": 1.02, "November": 0.88}
     return months.get(month, 1.0)
 
-def get_wind_arrow(deg):
-    arrows = ['↓', '↙', '←', '↖', '↑', '↗', '→', '↘']
-    idx = int((deg + 22.5) % 360 / 45)
-    return arrows[idx]
-
 def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.0):
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
@@ -31,10 +26,9 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     B = 1.3 + (eff_v / 150)
     v_sym = eff_v * np.sqrt((r_max / r)**B * np.exp(1 - (r_max / r)**B))
     
-    # Mesovort Injection (Fluid Microphysics)
+    # Mesovort Injection
     mv_bonus = 0
     if micro_scale > 0 and abs(r - r_max) < (r_max * 0.4):
-        # Create 4 orbiting mesovorts
         for i in range(4):
             mv_angle = (time.time() * 0.5) + (i * np.pi / 2)
             mv_x = r_max * np.cos(mv_angle)
@@ -51,138 +45,112 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     
     return max(0, (v_sym * shear_effect) + v_forward + mv_bonus), np.degrees(wind_angle_rad), r
 
-def get_synthetic_products(lat, lon, s_lat, s_lon, p, nyquist=60, active_radar_coords=None, micro_scale=0.0):
+def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_scale=0.0):
     v_max, r_max, _, _, _, _, rh, _, symmetry, _ = p
-    w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, micro_scale=micro_scale)
+    w_kts, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, micro_scale=micro_scale)
+    w_mph = w_kts * 1.15078 # Convert to mph for your +/- 149 request
+    
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
     
-    # Reflectivity logic with Mesovort Enhancement
-    eyewall = 60 * np.exp(-((r - r_max)**2) / (r_max * 0.25)**2)
-    if micro_scale > 0:
-        eyewall *= (1 + (micro_scale * 0.3 * np.sin(angle * 5))) # Granular texture
-        
-    bands = max(0, np.sin(r / (r_max * 0.7) - angle * 2.5) * 40 * np.exp(-r / 150))
-    dbz = (eyewall + bands + 18) * (rh / 100) * symmetry
-    if r < r_max * 0.35: dbz *= 0.1 
-
-    if active_radar_coords:
-        rdx, rdy = (lon - active_radar_coords[1]) * 53, (lat - active_radar_coords[0]) * 69
-        angle_to_radar = np.arctan2(rdy, rdx)
-        radial_v = w * np.cos(np.radians(wd) - angle_to_radar)
-        aliased_v = ((radial_v + nyquist) % (2 * nyquist)) - nyquist
-    else:
-        aliased_v = 0
-
-    surge = 0
-    is_coastal = 30.10 <= lat <= 30.45 
-    if is_coastal:
-        surge = (w**2 / 2000) * (1.4 if np.sin(angle) > 0 else 0.4)
+    # --- ENHANCED REFLECTIVITY (Fuller Structure) ---
+    # Core eyewall
+    eyewall = 65 * np.exp(-((r - r_max)**2) / (r_max * 0.6)**2) 
+    # Broad rain shield (Filling the hurricane)
+    shield = 35 * np.exp(-r / (r_max * 4)) 
+    # Spiral bands
+    bands = max(0, np.sin(r / (r_max * 0.8) - angle * 3.0) * 25 * np.exp(-r / 200))
     
-    prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
+    dbz = (eyewall + shield + bands) * (rh / 100) * (0.5 + 0.5 * symmetry)
+    if r < r_max * 0.25: dbz *= 0.1 # Clearer eye
+    
+    # --- FLUID VELOCITY (Radial) ---
+    radial_v_mph = 0
+    if radar_coords:
+        rdx, rdy = (lon - radar_coords[1]) * 53, (lat - radar_coords[0]) * 69
+        angle_to_radar = np.arctan2(rdy, rdx)
+        # Component of wind moving toward/away from radar
+        radial_v_mph = w_mph * np.cos(np.radians(wd) - angle_to_radar)
+        # Cap at your requested 149mph
+        radial_v_mph = np.clip(radial_v_mph, -149, 149)
 
-    return min(75, dbz), aliased_v, surge, prob
+    # Surge & Prob Logic
+    surge = (w_kts**2 / 2000) * (1.4 if np.sin(angle) > 0 else 0.4) if 30.10 <= lat <= 30.45 else 0
+    prob = 90 if w_kts >= 96 else 60 if w_kts >= 64 else 30 if w_kts >= 34 else 0
 
-# --- 2. SESSION STATE & RADAR SITES ---
-RADAR_SITES = {
-    "KMOB": (30.67, -88.24),
-    "KLIX": (30.33, -89.82),
-    "KEVX": (30.56, -85.92)
-}
+    return min(75, dbz), radial_v_mph, surge, prob
+
+# --- 2. RADAR SITES ---
+RADAR_SITES = {"KMOB": (30.67, -88.24), "KLIX": (30.33, -89.82), "KEVX": (30.56, -85.92)}
 
 if 'active_radar' not in st.session_state:
     st.session_state.active_radar = "KMOB"
 
-# --- 3. UI & SIDEBAR ---
-st.set_page_config(layout="wide", page_title="LHIM | Microphysics Alpha")
+# --- 3. UI ---
+st.set_page_config(layout="wide", page_title="LHIM | Velocity Update")
 
 with st.sidebar:
-    st.title("🛡️ LHIM v2.5")
-    radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."])
-    
-    with st.expander("🌀 Advanced Physics", expanded=True):
-        micro_scale = st.slider("Microphysics Scale", 0.0, 1.0, 0.4, help="Adds fluid mesovorts and granular precipitation physics.")
-        time_offset = st.slider("Radar Loop (Hours Ago)", 0, 12, 0, help="Rewind the storm position based on current motion vectors.")
-        
+    st.title("🛡️ LHIM v2.6")
+    radar_view = st.radio("Display Mode", ["Reflectivity (dBZ)", "Velocity (mph)", "Storm Surge", "Wind Prob."])
+    micro_scale = st.slider("Microphysics Scale", 0.0, 1.0, 0.4)
+    time_offset = st.slider("Radar Loop (Hours Ago)", 0, 12, 0)
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
-    f_speed = st.slider("Forward Speed (mph)", 2, 40, 12)
-    f_dir = st.slider("Heading (Deg)", 0, 360, 330)
-    rh, symmetry = st.slider("Humidity", 30, 100, 85), st.slider("Symmetry", 0.0, 1.0, 0.85)
-    l_lat, l_lon = st.number_input("Landfall Lat", value=30.35), st.number_input("Landfall Lon", value=-88.15)
-    res_steps = st.select_slider("Performance / Quality", options=[30, 45, 60], value=45)
+    f_speed, f_dir = st.slider("Forward Speed", 2, 40, 12), st.slider("Heading", 0, 360, 330)
+    l_lat, l_lon = st.number_input("Lat", value=30.35), st.number_input("Lon", value=-88.15)
+    res_steps = st.select_slider("Quality", options=[30, 45, 60, 80], value=45)
 
-# Calculate temporal storm center
-# Move center backwards along the heading vector
+# Temporal Adjustment
 dist_back = (f_speed * time_offset) / 69.0
-move_rad = np.radians(f_dir)
-# Adding 180 to heading to go backwards
-current_lat = l_lat - (dist_back * np.cos(move_rad))
-current_lon = l_lon - (dist_back * np.sin(move_rad))
+current_lat = l_lat - (dist_back * np.cos(np.radians(f_dir)))
+current_lon = l_lon - (dist_back * np.sin(np.radians(f_dir)))
+p = [v_max, r_max, f_speed, f_dir, 8, 260, 85, 0.8, 0.85, get_sst_mult("September")]
 
-p = [v_max, r_max, f_speed, f_dir, 8, 260, rh, 0.8, symmetry, get_sst_mult("September")]
-
-# --- 4. MAP & LOGIC ---
+# --- 4. MAP RENDERING ---
 c1, c2 = st.columns([4, 1.5])
 
 with c1:
     m = folium.Map(location=[l_lat, l_lon], zoom_start=8, tiles="CartoDB DarkMatter")
-    
-    # Historical Track Line
-    if time_offset > 0:
-        folium.PolyLine([[current_lat, current_lon], [l_lat, l_lon]], color="white", weight=2, dash_array='5, 10', opacity=0.5).add_to(m)
-
-    for name, coords in RADAR_SITES.items():
-        color = "red" if st.session_state.active_radar == name else "gray"
-        folium.Marker(location=coords, popup=f"Radar: {name}", icon=folium.Icon(color=color, icon="broadcast-tower", prefix="fa")).add_to(m)
-
-    lats = np.linspace(l_lat-2.5, l_lat+2.5, res_steps)
-    lons = np.linspace(l_lon-2.5, l_lon+2.5, int(res_steps * 1.2))
-    d_lat, d_lon = lats[1]-lats[0], lons[1]-lons[0]
-    
     radar_coords = RADAR_SITES[st.session_state.active_radar]
-    
+
+    lats = np.linspace(l_lat-3.0, l_lat+3.0, res_steps)
+    lons = np.linspace(l_lon-3.0, l_lon+3.0, int(res_steps * 1.2))
+    d_lat, d_lon = lats[1]-lats[0], lons[1]-lons[0]
+
     for lt in lats:
         for ln in lons:
-            dbz, vel, surge, prob = get_synthetic_products(lt, ln, current_lat, current_lon, p, 65, radar_coords, micro_scale)
+            dbz, vel, surge, prob = get_synthetic_products(lt, ln, current_lat, current_lon, p, radar_coords, micro_scale)
             color = None
             
-            if radar_view == "Reflectivity (dBZ)" and dbz > 18:
-                color = '#ff0000' if dbz > 50 else '#ff9900' if dbz > 40 else '#ffff00' if dbz > 30 else '#00ff00'
-            elif radar_view == "Velocity (kts)":
-                v_norm = np.clip(vel / 65, -1, 1)
-                color = '#ff0000' if v_norm > 0.6 else '#ff9999' if v_norm > 0 else '#99ff99' if v_norm > -0.6 else '#00aa00'
-            elif radar_view == "Storm Surge" and surge > 1.2:
-                color = '#330066' if surge > 10 else '#0033ff' if surge > 5 else '#00ffff'
-            elif radar_view == "Wind Prob." and prob > 0:
-                color = '#ff00ff' if prob >= 90 else '#ff6600' if prob >= 60 else '#ffff00'
+            # REFLECTIVITY: Fuller, smoother gradients
+            if radar_view == "Reflectivity (dBZ)" and dbz > 15:
+                if dbz > 55: color = '#7a0000' # Deep Maroon
+                elif dbz > 50: color = '#ff0000' # Red
+                elif dbz > 40: color = '#ff9900' # Orange
+                elif dbz > 30: color = '#ffff00' # Yellow
+                elif dbz > 20: color = '#00ff00' # Green
+                else: color = '#006600' # Dark Green
+
+            # VELOCITY: Inbound (Green/Blue) vs Outbound (Red/Yellow)
+            elif radar_view == "Velocity (mph)" and abs(vel) > 5:
+                # Inbound (Negative values = moving toward radar)
+                if vel < 0:
+                    if vel < -100: color = '#003300' # Deep Inbound
+                    elif vel < -64: color = '#00cc00' # Strong Inbound
+                    else: color = '#99ff99' # Light Inbound
+                # Outbound (Positive values = moving away from radar)
+                else:
+                    if vel > 100: color = '#660000' # Deep Outbound
+                    elif vel > 64: color = '#ff0000' # Strong Outbound
+                    else: color = '#ffcccc' # Light Outbound
 
             if color:
-                folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.6, weight=0).add_to(m)
+                folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.7, weight=0).add_to(m)
 
-    map_data = st_folium(m, width="100%", height=750)
-
-    if map_data.get("last_object_clicked_popup"):
-        clicked_name = map_data["last_object_clicked_popup"].split(": ")[-1]
-        if clicked_name in RADAR_SITES and clicked_name != st.session_state.active_radar:
-            st.session_state.active_radar = clicked_name
-            st.rerun()
+    st_folium(m, width="100%", height=750)
 
 with c2:
-    st.subheader("📊 Microphysics Analysis")
-    st.info(f"Looping: **T-{time_offset}h** | Radar: **{st.session_state.active_radar}**")
-    
-    if map_data and map_data.get("last_clicked"):
-        clat, clon = map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]
-        dbz, vel, surge, prob = get_synthetic_products(clat, clon, current_lat, current_lon, p, 65, radar_coords, micro_scale)
-        w, _, _ = calculate_full_physics(clat, clon, current_lat, current_lon, p, micro_scale=micro_scale)
-        
-        st.metric("Point Wind", f"{int(w)} kts", f"{(micro_scale*w*0.15):+.1f} MV Effect")
-        st.metric("Storm Surge", f"{surge:.1f} ft")
-        
-        st.write(f"**Vorticity Intensity:** {'High' if micro_scale > 0.7 else 'Moderate' if micro_scale > 0.3 else 'Low'}")
-        st.write(f"**Reflectivity:** {dbz:.1f} dBZ")
-    else:
-        st.write("Click map for point inspection.")
-
-    st.markdown("---")
-    st.caption(f"Micro-vortices enabled at {micro_scale*100}%. Storm center adjusted to T-{time_offset}h coordinates: {current_lat:.2f}, {current_lon:.2f}.")
+    st.subheader("📊 Radar Diagnostics")
+    st.write(f"**Velocity Range:** -149 to +149 mph")
+    st.write("🟢 **Inbound:** Wind moving toward radar.")
+    st.write("🔴 **Outbound:** Wind moving away from radar.")
+    st.info("The reflectivity rain-shield has been expanded to simulate a mature hurricane 'fill'.")
