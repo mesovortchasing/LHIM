@@ -82,6 +82,8 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
 # --- 2. SESSION STATE ---
 if 'active_radar' not in st.session_state: st.session_state.active_radar = "KMOB"
 if 'loop_idx' not in st.session_state: st.session_state.loop_idx = 0
+if 'is_playing' not in st.session_state: st.session_state.is_playing = False
+
 RADAR_SITES = {"KMOB": (30.67, -88.24), "KLIX": (30.33, -89.82), "KEVX": (30.56, -85.92)}
 geolocator = Nominatim(user_agent="lhim_weather_app_v29")
 
@@ -96,8 +98,14 @@ with st.sidebar:
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         surge_threshold = st.slider("Warning Trigger (ft)", 3, 12, 6)
 
-    run_loop = st.checkbox("🔄 Enable Radar Loop")
+    st.subheader("📡 Radar Controls")
+    run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
+    st.session_state.is_playing = run_loop
     
+    # Unified Slider for History/Future
+    current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
+    st.session_state.loop_idx = current_time_offset
+
     with st.expander("🌡️ Environmental Layers", expanded=True):
         sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
         front_lat = st.slider("Cold Front Latitude", 30.0, 32.5, 31.8)
@@ -107,24 +115,20 @@ with st.sidebar:
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
     
-    if run_loop:
-        st.session_state.loop_idx = (st.session_state.loop_idx + 1) % 13
-        current_time_offset = st.session_state.loop_idx
-    else:
-        current_time_offset = st.slider("Time Offset (Hrs)", 0, 12, 0)
-
     f_speed, f_dir = st.slider("Forward Speed", 2, 40, 12), st.slider("Heading", 0, 360, 330)
     l_lat, l_lon = st.number_input("Landfall Lat", value=30.35), st.number_input("Landfall Lon", value=-88.15)
     res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
-dist_back = (f_speed * current_time_offset) / 69.0
-current_lat = l_lat - (dist_back * np.cos(np.radians(f_dir)))
-current_lon = l_lon - (dist_back * np.sin(np.radians(f_dir)))
+# Calculate current storm position based on the unified offset
+dist_moved = (f_speed * current_time_offset) / 69.0
+current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
+current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
 p = [v_max, r_max, f_speed, f_dir, shear_mag, 240, rh, 0.8, 0.85, get_sst_mult("September", sst_boost)]
 
 # --- 4. MAP & DASHBOARD ---
 c1, c2 = st.columns([4, 1.8])
 with c1:
+    # Use key based on loop_idx to force clean re-renders only when necessary
     m = folium.Map(location=[l_lat, l_lon], zoom_start=8, tiles="CartoDB DarkMatter")
     radar_coords = RADAR_SITES[st.session_state.active_radar]
     
@@ -152,7 +156,7 @@ with c1:
             if color:
                 folium.Rectangle(bounds=[[lt, ln], [lt+d_lat, ln+d_lon]], color=color, fill=True, fill_opacity=0.6, weight=0).add_to(m)
 
-    map_data = st_folium(m, width="100%", height=750, key=f"map_{st.session_state.loop_idx}", returned_objects=["last_clicked"])
+    map_data = st_folium(m, width="100%", height=750, key=f"map_frame_{st.session_state.loop_idx}", returned_objects=["last_clicked"])
 
 with c2:
     st.markdown("""<style> .weather-card { background-color: #003366; color: white; padding: 20px; border-radius: 10px; border-left: 10px solid #ffcc00; } 
@@ -176,7 +180,7 @@ with c2:
         local_dewp = local_temp - (100 - rh) * 0.15
         gust = w_kts * (1.35 if w_kts > 90 else 1.22)
 
-        st.markdown(f"<div class='weather-card'><h2>📍 {loc_name}</h2><h3>CURRENT CONDITIONS</h3></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='weather-card'><h2>📍 {loc_name}</h2><h3>AT T{current_time_offset:+} HOURS</h3></div>", unsafe_allow_html=True)
         
         k1, k2 = st.columns(2)
         k1.metric("TEMP", f"{int(local_temp)}°F")
@@ -189,16 +193,14 @@ with c2:
         
         forecast_rows = []
         for hour in range(1, 7):
-            f_dist = (f_speed * hour) / 69.0
-            # Projecting storm movement
-            f_lat = current_lat + (f_dist * np.cos(np.radians(f_dir)))
-            f_lon = current_lon + (f_dist * np.sin(np.radians(f_dir)))
+            f_dist = (f_speed * (current_time_offset + hour)) / 69.0
+            f_lat = l_lat + (f_dist * np.cos(np.radians(f_dir)))
+            f_lon = l_lon + (f_dist * np.sin(np.radians(f_dir)))
             
             f_dbz, _, f_surge, _ = get_synthetic_products(clat, clon, f_lat, f_lon, p, front_lat=front_lat)
             f_w, _, f_r = calculate_full_physics(clat, clon, f_lat, f_lon, p, front_lat=front_lat)
             f_gust = f_w * (1.35 if f_w > 90 else 1.2)
 
-            # Intensity Specific Descriptors
             if f_w > 115: w_desc = "DEVASTATING"
             elif f_w > 95: w_desc = "EXTREME"
             elif f_w > 64: w_desc = "HURRICANE"
@@ -206,15 +208,7 @@ with c2:
             elif f_w > 20: w_desc = "BREEZY"
             else: w_desc = "LIGHT WINDS"
 
-            # Situational Condition Logic
-            if f_r < r_max * 1.2: 
-                cond = f"EYEWALL: {w_desc} WINDS"
-            elif f_dbz > 50:
-                cond = f"TORRENTIAL: {w_desc} WINDS"
-            elif f_surge > 4:
-                cond = f"SURGE THREAT: {w_desc}"
-            else:
-                cond = f"{w_desc} / RAIN"
+            cond = f"EYEWALL: {w_desc}" if f_r < r_max * 1.2 else f"{w_desc} / RAIN"
 
             forecast_rows.append({
                 "Time": f"T+{hour}h",
@@ -224,14 +218,14 @@ with c2:
             })
         
         st.dataframe(pd.DataFrame(forecast_rows), hide_index=True)
-        
-        if surge > 6:
-            st.error(f"🚨 CRITICAL SURGE WARNING: Life-threatening inundation of {surge:.1f}ft is occurring or imminent. Seek higher ground.")
-        elif w_kts > 64:
-            st.warning(f"🌬️ HURRICANE FORCE WINDS: Structural damage possible. Stay indoors away from windows.")
     else:
-        st.info("🛰️ Click map to initialize the Impact Dashboard.")
+        st.info("🛰️ Click map to analyze conditions at the selected timestamp.")
 
-if run_loop:
-    time.sleep(0.05)
+# --- 5. AUTOMATED LOOP ENGINE ---
+if st.session_state.is_playing:
+    # Increment loop, wrapping from +12 back to -12
+    st.session_state.loop_idx += 1
+    if st.session_state.loop_idx > 12:
+        st.session_state.loop_idx = -12
+    time.sleep(0.1) # Smoother transition delay
     st.rerun()
