@@ -247,6 +247,81 @@ RADAR_SITES = {
 }
 
 
+def velocity_color_hyperrealistic(vel):
+    """Hyperrealistic dark velocity table from -149 to +149 mph.
+    Negative velocities use darker greens/cyans into icy teal.
+    Positive velocities use darker reds/maroons into magenta.
+    Near-zero values stay transparent.
+    """
+    if abs(vel) < 3:
+        return None
+
+    mag = min(149.0, abs(float(vel)))
+
+    if vel < 0:
+        if mag < 10:
+            return "#0b2818"
+        elif mag < 20:
+            return "#0e3a22"
+        elif mag < 30:
+            return "#11502f"
+        elif mag < 40:
+            return "#14643b"
+        elif mag < 50:
+            return "#187947"
+        elif mag < 60:
+            return "#1d8f56"
+        elif mag < 70:
+            return "#16956b"
+        elif mag < 80:
+            return "#0b8f7e"
+        elif mag < 90:
+            return "#0b8691"
+        elif mag < 100:
+            return "#0f78a3"
+        elif mag < 110:
+            return "#1367b2"
+        elif mag < 120:
+            return "#1854bc"
+        elif mag < 130:
+            return "#1d43c5"
+        elif mag < 140:
+            return "#2431ca"
+        else:
+            return "#2c1fcf"
+    else:
+        if mag < 10:
+            return "#2a0b0b"
+        elif mag < 20:
+            return "#3c1010"
+        elif mag < 30:
+            return "#551313"
+        elif mag < 40:
+            return "#6d1414"
+        elif mag < 50:
+            return "#861616"
+        elif mag < 60:
+            return "#9f1717"
+        elif mag < 70:
+            return "#b31b1b"
+        elif mag < 80:
+            return "#bf1828"
+        elif mag < 90:
+            return "#c3153a"
+        elif mag < 100:
+            return "#c1144f"
+        elif mag < 110:
+            return "#bc1364"
+        elif mag < 120:
+            return "#b5147c"
+        elif mag < 130:
+            return "#ab1693"
+        elif mag < 140:
+            return "#9c18ab"
+        else:
+            return "#8d1bc2"
+
+
 def get_zone_for_point(lat, lon):
     for zone_name, meta in ZONES.items():
         (lat1, lon1), (lat2, lon2) = meta["bounds"]
@@ -550,10 +625,7 @@ with c1:
                     "#00ff00"
                 )
             elif radar_view == "Velocity (kts)":
-                if vel < -5:
-                    color = "#00ffff" if vel < -110 else "#00ccff" if vel < -75 else "#00aa00"
-                elif vel > 5:
-                    color = "#ff00ff" if vel > 110 else "#ff0000" if vel > 75 else "#880000"
+                color = velocity_color_hyperrealistic(vel)
             elif radar_view == "Storm Surge" and abs(surge) > 0.5:
                 color = (
                     "#4b0082" if surge > 12 else
