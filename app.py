@@ -882,8 +882,7 @@ def build_extreme_wind_warning_polygon(
     Build a realistic warning polygon elongated along the storm motion.
     Shapes the polygon more like a real NWS downstream wind warning.
     """
-    # scale polygon length/width by storm size and motion
-        intensity_factor = np.clip(kt_to_mph(v_max) / 120.0, 0.75, 1.6)
+    intensity_factor = np.clip(kt_to_mph(v_max) / 120.0, 0.75, 1.6)
     asymmetry_factor = 1.0 + ((1.0 - symmetry) * 0.8) + (shear_mag / 120.0)
     roughness_factor = 1.0 + (urban_factor * 0.35) + ((1.0 - terrain_friction) * 0.4)
 
@@ -892,23 +891,18 @@ def build_extreme_wind_warning_polygon(
     half_width_left = max(7, min(26, r_max * 0.52 * roughness_factor))
     half_width_right = max(10, min(38, r_max * 0.78 * intensity_factor * asymmetry_factor))
 
-    # front center / rear center of polygon axis
     front_lat, front_lon = offset_latlon(center_lat, center_lon, lead_miles, heading_deg)
     rear_lat, rear_lon = offset_latlon(center_lat, center_lon, trail_miles, heading_deg + 180)
 
-    # left/right bearings relative to motion
     left_bearing = heading_deg - 90
     right_bearing = heading_deg + 90
 
-    # front corners
     f_left_lat, f_left_lon = offset_latlon(front_lat, front_lon, half_width_left, left_bearing)
     f_right_lat, f_right_lon = offset_latlon(front_lat, front_lon, half_width_right, right_bearing)
 
-    # rear corners
     r_left_lat, r_left_lon = offset_latlon(rear_lat, rear_lon, half_width_left * 0.72, left_bearing)
     r_right_lat, r_right_lon = offset_latlon(rear_lat, rear_lon, half_width_right * 0.72, right_bearing)
 
-    # small extra point near front-right for a more NWS-style "pushed" polygon
     tip_lat, tip_lon = offset_latlon(front_lat, front_lon, max(4, r_max * 0.25), heading_deg + 20)
 
     polygon = [
@@ -953,6 +947,32 @@ def generate_fake_ugc():
 
 def build_localized_risk_text(selected_places, gust_mph):
     place_bits = []
+
+    for place in selected_places[:4]:
+        if place in PLACE_CONTEXT:
+            ctx = PLACE_CONTEXT[place]
+            place_bits.append(f"{place}: {ctx['risk_notes']}")
+
+    if gust_mph >= 130:
+        severity_line = (
+            "This scenario supports destructive wind damage comparable to the most dangerous hurricane core impacts, "
+            "including major roof failure, extensive tree loss, and long-duration utility failure."
+        )
+    elif gust_mph >= 110:
+        severity_line = (
+            "This scenario supports widespread destructive wind damage, including major tree loss, structural damage, "
+            "and impassable roads from debris."
+        )
+    else:
+        severity_line = (
+            "This scenario supports scattered to widespread wind damage with falling trees, utility damage, and dangerous debris."
+        )
+
+    if not place_bits:
+        return severity_line
+
+    return severity_line + " " + " ".join(place_bits)
+
 
 def summarize_place_terrain(selected_places):
     terrain_bits = []
@@ -1014,9 +1034,9 @@ def generate_extreme_wind_warning_text(
     lat5, lon5 = polygon[4]
 
     places_line = ", ".join(selected_places) if selected_places else "portions of coastal Mobile County"
-localized_risk_text = build_localized_risk_text(selected_places, gust_mph)
-terrain_summary = summarize_place_terrain(selected_places)
-motion_mph = int(round(f_speed * 1.15078))
+    localized_risk_text = build_localized_risk_text(selected_places, gust_mph)
+    terrain_summary = summarize_place_terrain(selected_places)
+    motion_mph = int(round(f_speed * 1.15078))
 
     text = f"""BULLETIN - EAS ACTIVATION REQUESTED
 Extreme Wind Warning
@@ -1181,32 +1201,32 @@ if (
     landfall_env["gust_mph"] >= extreme_wind_threshold_mph
     or landfall_env["wind_mph"] >= (extreme_wind_threshold_mph - 15)
 ):
-warning_polygon = build_extreme_wind_warning_polygon(
-    l_lat,
-    l_lon,
-    f_dir,
-    f_speed,
-    r_max,
-    v_max,
-    symmetry,
-    shear_mag,
-    landfall_zone_meta["terrain_friction"],
-    landfall_zone_meta["urban_factor"],
-)
+    warning_polygon = build_extreme_wind_warning_polygon(
+        l_lat,
+        l_lon,
+        f_dir,
+        f_speed,
+        r_max,
+        v_max,
+        symmetry,
+        shear_mag,
+        landfall_zone_meta["terrain_friction"],
+        landfall_zone_meta["urban_factor"],
+    )
     warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
     example_warning_text = generate_extreme_wind_warning_text(
-    warning_polygon,
-    l_lat,
-    l_lon,
-    current_lat,
-    current_lon,
-    f_dir,
-    f_speed,
-    v_max,
-    landfall_env["wind_mph"],
-    landfall_env["gust_mph"],
-    warning_places,
-)
+        warning_polygon,
+        l_lat,
+        l_lon,
+        current_lat,
+        current_lon,
+        f_dir,
+        f_speed,
+        v_max,
+        landfall_env["wind_mph"],
+        landfall_env["gust_mph"],
+        warning_places,
+    )
 
 # -----------------------------
 # 7. MAP & DASHBOARD
@@ -1544,59 +1564,59 @@ with c2:
         unsafe_allow_html=True,
     )
 
-    if show_warning_text_panel and warning_polygon is not None:
-    st.divider()
-    st.subheader("🚨 Example Extreme Wind Warning")
+        if show_warning_text_panel and warning_polygon is not None:
+        st.divider()
+        st.subheader("🚨 Example Extreme Wind Warning")
 
-    tab1, tab2, tab3 = st.tabs(["Warning Text", "Local Risk", "Polygon Meta"])
+        tab1, tab2, tab3 = st.tabs(["Warning Text", "Local Risk", "Polygon Meta"])
 
-    with tab1:
-        st.markdown(
-            f"""
-            <div style="
-                background:#11131a;
-                border:2px solid #ff4d4d;
-                border-radius:12px;
-                padding:14px;
-                color:#f5f7fa;
-                font-family:monospace;
-                font-size:13px;
-                white-space:pre-wrap;
-                line-height:1.25;
-                max-height:420px;
-                overflow-y:auto;
-                box-shadow:0 0 14px rgba(255,77,77,0.18);
-            ">{example_warning_text}</div>
-            """,
-            unsafe_allow_html=True,
-        )
+        with tab1:
+            st.markdown(
+                f"""
+                <div style="
+                    background:#11131a;
+                    border:2px solid #ff4d4d;
+                    border-radius:12px;
+                    padding:14px;
+                    color:#f5f7fa;
+                    font-family:monospace;
+                    font-size:13px;
+                    white-space:pre-wrap;
+                    line-height:1.25;
+                    max-height:420px;
+                    overflow-y:auto;
+                    box-shadow:0 0 14px rgba(255,77,77,0.18);
+                ">{example_warning_text}</div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    with tab2:
-        risk_rows = []
-        for place in warning_places:
-            if place in PLACE_CONTEXT:
-                risk_rows.append({
-                    "Place": place,
-                    "Terrain": PLACE_CONTEXT[place]["terrain"],
-                    "Risk": PLACE_CONTEXT[place]["risk_notes"],
-                })
-        if risk_rows:
-            st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
-        else:
-            st.info("No localized risk notes available for this scenario.")
+        with tab2:
+            risk_rows = []
+            for place in warning_places:
+                if place in PLACE_CONTEXT:
+                    risk_rows.append({
+                        "Place": place,
+                        "Terrain": PLACE_CONTEXT[place]["terrain"],
+                        "Risk": PLACE_CONTEXT[place]["risk_notes"],
+                    })
+            if risk_rows:
+                st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
+            else:
+                st.info("No localized risk notes available for this scenario.")
 
-    with tab3:
-        st.dataframe(pd.DataFrame([{
-            "Landfall Zone": landfall_zone_name,
-            "Storm Heading": deg_to_compass(f_dir),
-            "Forward Speed": f"{f_speed:.0f} kt / {kt_to_mph(f_speed):.0f} mph",
-            "Intensity": f"{v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph",
-            "RMW": f"{r_max:.0f} mi",
-            "Symmetry": f"{symmetry:.2f}",
-            "Shear": f"{shear_mag:.0f} kt",
-            "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
-            "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
-        }]), hide_index=True, use_container_width=True)
+        with tab3:
+            st.dataframe(pd.DataFrame([{
+                "Landfall Zone": landfall_zone_name,
+                "Storm Heading": deg_to_compass(f_dir),
+                "Forward Speed": f"{f_speed:.0f} kt / {kt_to_mph(f_speed):.0f} mph",
+                "Intensity": f"{v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph",
+                "RMW": f"{r_max:.0f} mi",
+                "Symmetry": f"{symmetry:.2f}",
+                "Shear": f"{shear_mag:.0f} kt",
+                "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
+                "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
+            }]), hide_index=True, use_container_width=True)
     
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
