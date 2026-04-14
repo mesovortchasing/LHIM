@@ -341,6 +341,7 @@ CITY_POINTS = {
     "Coden": (30.3935, -88.1517),
     "Mount Vernon": (31.0877, -88.0130),
     "Citronelle": (31.0907, -88.2281),
+    "Dauphin Island": (30.2505, -88.1097),
 }
 
 PLACE_CONTEXT = {
@@ -1176,7 +1177,10 @@ warning_polygon = None
 warning_places = []
 example_warning_text = ""
 
-if landfall_env["gust_mph"] >= extreme_wind_threshold_mph:
+if (
+    landfall_env["gust_mph"] >= extreme_wind_threshold_mph
+    or landfall_env["wind_mph"] >= (extreme_wind_threshold_mph - 15)
+):
 warning_polygon = build_extreme_wind_warning_polygon(
     l_lat,
     l_lon,
