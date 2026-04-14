@@ -343,6 +343,89 @@ CITY_POINTS = {
     "Citronelle": (31.0907, -88.2281),
 }
 
+PLACE_CONTEXT = {
+    "Mobile": {
+        "terrain": "urban core and mixed residential areas",
+        "risk_notes": "Damage may be amplified by dense development, traffic signal failures, and widespread tree and powerline impacts."
+    },
+    "Downtown Mobile": {
+        "terrain": "dense urban district with mid-rise buildings, port infrastructure, and exposed road corridors",
+        "risk_notes": "Strong winds may accelerate around taller buildings and create dangerous debris conditions near commercial blocks and port facilities."
+    },
+    "Prichard": {
+        "terrain": "urban-residential corridor with tree cover and older infrastructure",
+        "risk_notes": "Older structures, snapped limbs, and scattered utility damage may produce blocked roads and long-duration outages."
+    },
+    "Chickasaw": {
+        "terrain": "compact residential-industrial area",
+        "risk_notes": "Damage risk includes roof failure, tree fall, and industrial debris in exposed corridors."
+    },
+    "Saraland": {
+        "terrain": "suburban-commercial corridor with neighborhoods and retail exposure",
+        "risk_notes": "Shopping centers, signage, and wide roadways are vulnerable to destructive gusts and flying debris."
+    },
+    "Satsuma": {
+        "terrain": "suburban wooded residential area",
+        "risk_notes": "Large trees and neighborhood access roads may become blocked quickly under prolonged extreme winds."
+    },
+    "Axis": {
+        "terrain": "rural-residential area with open exposure",
+        "risk_notes": "Open terrain may allow stronger gust penetration with falling timber and utility line damage."
+    },
+    "Semmes": {
+        "terrain": "inland suburban-wooded terrain",
+        "risk_notes": "Tree damage and prolonged utility outages may become a primary hazard in residential sections."
+    },
+    "Wilmer": {
+        "terrain": "rural inland terrain with open stretches and scattered development",
+        "risk_notes": "Exposure across open land may increase structural and tree-fall damage potential."
+    },
+    "Theodore": {
+        "terrain": "mixed residential, industrial, and coastal-transition corridor",
+        "risk_notes": "Structural damage risk is elevated near exposed industrial areas and open road corridors."
+    },
+    "Dawes": {
+        "terrain": "suburban corridor with commercial strips and residential pockets",
+        "risk_notes": "Signage, roofing, and roadside debris may become major hazards."
+    },
+    "Tillmans Corner": {
+        "terrain": "busy commercial corridor with major road exposure",
+        "risk_notes": "Gas stations, storefronts, signage, and wide parking lots increase debris and access hazards."
+    },
+    "Irvington": {
+        "terrain": "low-lying semi-rural area with scattered communities",
+        "risk_notes": "Falling trees, road blockage, and isolated structural failure may cut off local access routes."
+    },
+    "Grand Bay": {
+        "terrain": "rural low-lying inland-coastal transition zone",
+        "risk_notes": "Open terrain and tree exposure may support widespread wind damage and difficult travel conditions."
+    },
+    "Bayou La Batre": {
+        "terrain": "working waterfront fishing community with marine exposure",
+        "risk_notes": "Extreme wind impacts may be severe near docks, marine facilities, and exposed low-elevation structures."
+    },
+    "Coden": {
+        "terrain": "coastal low-lying community with strong marine exposure",
+        "risk_notes": "Extreme winds may combine with coastal flooding, structural damage, and isolation of access routes."
+    },
+    "Mount Vernon": {
+        "terrain": "inland industrial-rural corridor",
+        "risk_notes": "Industrial exposure and tree damage may create localized but serious access and debris hazards."
+    },
+    "Citronelle": {
+        "terrain": "inland wooded small-town environment",
+        "risk_notes": "Tree fall and roof damage may become widespread if strong winds remain intact inland."
+    },
+    "West Mobile": {
+        "terrain": "large suburban-commercial corridor with shopping centers, multilane roads, and dense retail strips",
+        "risk_notes": "Big-box stores, parking lots, power poles, signage, and broad road exposure increase debris and infrastructure vulnerability."
+    },
+    "Dauphin Island": {
+        "terrain": "exposed barrier island with sparse development and limited access",
+        "risk_notes": "Extreme isolation risk, dune overwash, structural exposure, and rapid loss of safe travel routes are likely in severe scenarios."
+    },
+}
+
 RADAR_SITES = {
     "KMOB": (30.67, -88.24),
     "KLIX": (30.33, -89.82),
@@ -782,17 +865,31 @@ def offset_latlon(lat, lon, miles, bearing_deg):
     dlon = (miles * np.sin(bearing)) / (53.0 * np.cos(np.radians(max(1, abs(lat)))))
     return lat + dlat, lon + dlon
 
-
-def build_extreme_wind_warning_polygon(center_lat, center_lon, heading_deg, forward_speed, r_max, v_max):
+def build_extreme_wind_warning_polygon(
+    center_lat,
+    center_lon,
+    heading_deg,
+    forward_speed,
+    r_max,
+    v_max,
+    symmetry,
+    shear_mag,
+    terrain_friction,
+    urban_factor,
+):
     """
     Build a realistic warning polygon elongated along the storm motion.
     Shapes the polygon more like a real NWS downstream wind warning.
     """
     # scale polygon length/width by storm size and motion
-    lead_miles = max(22, min(70, r_max * 1.6 + forward_speed * 1.5))
-    trail_miles = max(8, min(22, r_max * 0.55))
-    half_width_left = max(8, min(24, r_max * 0.60))
-    half_width_right = max(10, min(30, r_max * 0.75))
+        intensity_factor = np.clip(kt_to_mph(v_max) / 120.0, 0.75, 1.6)
+    asymmetry_factor = 1.0 + ((1.0 - symmetry) * 0.8) + (shear_mag / 120.0)
+    roughness_factor = 1.0 + (urban_factor * 0.35) + ((1.0 - terrain_friction) * 0.4)
+
+    lead_miles = max(20, min(85, (r_max * 1.35 + forward_speed * 1.45) * intensity_factor * asymmetry_factor))
+    trail_miles = max(8, min(26, r_max * 0.50 * roughness_factor))
+    half_width_left = max(7, min(26, r_max * 0.52 * roughness_factor))
+    half_width_right = max(10, min(38, r_max * 0.78 * intensity_factor * asymmetry_factor))
 
     # front center / rear center of polygon axis
     front_lat, front_lon = offset_latlon(center_lat, center_lon, lead_miles, heading_deg)
@@ -853,6 +950,40 @@ def generate_fake_ugc():
     zone_part = str(np.random.randint(1, 999)).zfill(3)
     return f"ALC{county_part}-{zone_part}"
 
+def build_localized_risk_text(selected_places, gust_mph):
+    place_bits = []
+
+def summarize_place_terrain(selected_places):
+    terrain_bits = []
+    for place in selected_places[:3]:
+        if place in PLACE_CONTEXT:
+            terrain_bits.append(f"{place}: {PLACE_CONTEXT[place]['terrain']}")
+    return " | ".join(terrain_bits) if terrain_bits else "mixed coastal and inland terrain"
+
+    for place in selected_places[:4]:
+        if place in PLACE_CONTEXT:
+            ctx = PLACE_CONTEXT[place]
+            place_bits.append(f"{place}: {ctx['risk_notes']}")
+
+    if gust_mph >= 130:
+        severity_line = (
+            "This scenario supports destructive wind damage comparable to the most dangerous hurricane core impacts, "
+            "including major roof failure, extensive tree loss, and long-duration utility failure."
+        )
+    elif gust_mph >= 110:
+        severity_line = (
+            "This scenario supports widespread destructive wind damage, including major tree loss, structural damage, "
+            "and impassable roads from debris."
+        )
+    else:
+        severity_line = (
+            "This scenario supports scattered to widespread wind damage with falling trees, utility damage, and dangerous debris."
+        )
+
+    if not place_bits:
+        return severity_line
+
+    return severity_line + " " + " ".join(place_bits)
 
 def generate_extreme_wind_warning_text(
     polygon,
@@ -882,8 +1013,9 @@ def generate_extreme_wind_warning_text(
     lat5, lon5 = polygon[4]
 
     places_line = ", ".join(selected_places) if selected_places else "portions of coastal Mobile County"
-
-    motion_mph = int(round(f_speed * 1.15078))
+localized_risk_text = build_localized_risk_text(selected_places, gust_mph)
+terrain_summary = summarize_place_terrain(selected_places)
+motion_mph = int(round(f_speed * 1.15078))
 
     text = f"""BULLETIN - EAS ACTIVATION REQUESTED
 Extreme Wind Warning
@@ -901,10 +1033,13 @@ National Weather Service Mobile AL
 
 * IMPACTS...Expect extremely dangerous winds capable of producing extensive structural damage, downed trees, blocked roads, and prolonged power outages. Shelter in the interior portion of a well-built structure away from windows.
 
+* LOCAL RISK CONTEXT...{localized_risk_text}
+
 * ADDITIONAL DETAILS...
 At {issue_hour:02d}{issue_min:02d} PM CDT, the simulated landfalling eyewall was centered near {current_lat:.2f}N {abs(current_lon):.2f}W, moving {deg_to_compass(heading_deg)} at {motion_mph} mph.
 Landfall reference point: {landfall_lat:.2f}N {abs(landfall_lon):.2f}W.
 Maximum sustained winds were estimated near {int(round(kt_to_mph(v_max)))} mph.
+Terrain focus within the warned area includes {terrain_summary}.
 
 LAT...LON {int(lat1*100):04d} {int(abs(lon1)*100):04d} {int(lat2*100):04d} {int(abs(lon2)*100):04d} {int(lat3*100):04d} {int(abs(lon3)*100):04d}
       {int(lat4*100):04d} {int(abs(lon4)*100):04d} {int(lat5*100):04d} {int(abs(lon5)*100):04d}
@@ -1035,19 +1170,25 @@ landfall_env = compute_local_environment(
     ewr_phase=ewr_phase,
 )
 
+landfall_zone_name, landfall_zone_meta = get_zone_meta(l_lat, l_lon)
+
 warning_polygon = None
 warning_places = []
 example_warning_text = ""
 
 if landfall_env["gust_mph"] >= extreme_wind_threshold_mph:
-    warning_polygon = build_extreme_wind_warning_polygon(
-        l_lat,
-        l_lon,
-        f_dir,
-        f_speed,
-        r_max,
-        v_max,
-    )
+warning_polygon = build_extreme_wind_warning_polygon(
+    l_lat,
+    l_lon,
+    f_dir,
+    f_speed,
+    r_max,
+    v_max,
+    symmetry,
+    shear_mag,
+    landfall_zone_meta["terrain_friction"],
+    landfall_zone_meta["urban_factor"],
+)
     warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
     example_warning_text = generate_extreme_wind_warning_text(
     warning_polygon,
@@ -1400,9 +1541,58 @@ with c2:
     )
 
     if show_warning_text_panel and warning_polygon is not None:
-        st.divider()
-        st.subheader("🚨 Example Extreme Wind Warning")
-        st.code(example_warning_text, language="text")
+    st.divider()
+    st.subheader("🚨 Example Extreme Wind Warning")
+
+    tab1, tab2, tab3 = st.tabs(["Warning Text", "Local Risk", "Polygon Meta"])
+
+    with tab1:
+        st.markdown(
+            f"""
+            <div style="
+                background:#11131a;
+                border:2px solid #ff4d4d;
+                border-radius:12px;
+                padding:14px;
+                color:#f5f7fa;
+                font-family:monospace;
+                font-size:13px;
+                white-space:pre-wrap;
+                line-height:1.25;
+                max-height:420px;
+                overflow-y:auto;
+                box-shadow:0 0 14px rgba(255,77,77,0.18);
+            ">{example_warning_text}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with tab2:
+        risk_rows = []
+        for place in warning_places:
+            if place in PLACE_CONTEXT:
+                risk_rows.append({
+                    "Place": place,
+                    "Terrain": PLACE_CONTEXT[place]["terrain"],
+                    "Risk": PLACE_CONTEXT[place]["risk_notes"],
+                })
+        if risk_rows:
+            st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No localized risk notes available for this scenario.")
+
+    with tab3:
+        st.dataframe(pd.DataFrame([{
+            "Landfall Zone": landfall_zone_name,
+            "Storm Heading": deg_to_compass(f_dir),
+            "Forward Speed": f"{f_speed:.0f} kt / {kt_to_mph(f_speed):.0f} mph",
+            "Intensity": f"{v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph",
+            "RMW": f"{r_max:.0f} mi",
+            "Symmetry": f"{symmetry:.2f}",
+            "Shear": f"{shear_mag:.0f} kt",
+            "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
+            "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
+        }]), hide_index=True, use_container_width=True)
     
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
