@@ -861,6 +861,7 @@ def generate_extreme_wind_warning_text(
     current_lat,
     current_lon,
     heading_deg,
+    f_speed,
     v_max,
     wind_mph,
     gust_mph,
@@ -882,7 +883,9 @@ def generate_extreme_wind_warning_text(
 
     places_line = ", ".join(selected_places) if selected_places else "portions of coastal Mobile County"
 
-    text = f\"\"\"BULLETIN - EAS ACTIVATION REQUESTED
+    motion_mph = int(round(f_speed * 1.15078))
+
+    text = f"""BULLETIN - EAS ACTIVATION REQUESTED
 Extreme Wind Warning
 National Weather Service Mobile AL
 {issue_hour:02d}{issue_min:02d} PM CDT Mon Apr 13 2026
@@ -899,7 +902,7 @@ National Weather Service Mobile AL
 * IMPACTS...Expect extremely dangerous winds capable of producing extensive structural damage, downed trees, blocked roads, and prolonged power outages. Shelter in the interior portion of a well-built structure away from windows.
 
 * ADDITIONAL DETAILS...
-At {issue_hour:02d}{issue_min:02d} PM CDT, the simulated landfalling eyewall was centered near {current_lat:.2f}N {abs(current_lon):.2f}W, moving {deg_to_compass(heading_deg)} at {int(round((np.hypot(current_lat-landfall_lat, current_lon-landfall_lon) * 69)))} mph.
+At {issue_hour:02d}{issue_min:02d} PM CDT, the simulated landfalling eyewall was centered near {current_lat:.2f}N {abs(current_lon):.2f}W, moving {deg_to_compass(heading_deg)} at {motion_mph} mph.
 Landfall reference point: {landfall_lat:.2f}N {abs(landfall_lon):.2f}W.
 Maximum sustained winds were estimated near {int(round(kt_to_mph(v_max)))} mph.
 
@@ -908,7 +911,7 @@ LAT...LON {int(lat1*100):04d} {int(abs(lon1)*100):04d} {int(lat2*100):04d} {int(
 
 $$
 {ugc}
-\"\"\"
+"""
     return text
 
 # -----------------------------
@@ -1047,17 +1050,18 @@ if landfall_env["gust_mph"] >= extreme_wind_threshold_mph:
     )
     warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
     example_warning_text = generate_extreme_wind_warning_text(
-        warning_polygon,
-        l_lat,
-        l_lon,
-        current_lat,
-        current_lon,
-        f_dir,
-        v_max,
-        landfall_env["wind_mph"],
-        landfall_env["gust_mph"],
-        warning_places,
-    )
+    warning_polygon,
+    l_lat,
+    l_lon,
+    current_lat,
+    current_lon,
+    f_dir,
+    f_speed,
+    v_max,
+    landfall_env["wind_mph"],
+    landfall_env["gust_mph"],
+    warning_places,
+)
 
 # -----------------------------
 # 7. MAP & DASHBOARD
