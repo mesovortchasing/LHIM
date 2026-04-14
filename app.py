@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import folium
 from folium.features import DivIcon
+from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 import time
 from geopy.geocoders import Nominatim
@@ -568,6 +569,10 @@ def add_map_legend(m, radar_view):
         </div>
         """
 
+    legend_html += """
+    <hr style='border:0.5px solid #666; margin:6px 0;'>
+    <span style='color:#ff4d4d'>■</span> Extreme Wind Warning Polygon
+    """
     m.get_root().html.add_child(folium.Element(legend_html))
 
 
@@ -770,6 +775,141 @@ def build_forecast_track(l_lat, l_lon, f_speed, f_dir):
         })
     return points
 
+def offset_latlon(lat, lon, miles, bearing_deg):
+    """Move a point by distance/bearing. Good enough for local warning polygons."""
+    bearing = np.radians(bearing_deg)
+    dlat = (miles * np.cos(bearing)) / 69.0
+    dlon = (miles * np.sin(bearing)) / (53.0 * np.cos(np.radians(max(1, abs(lat)))))
+    return lat + dlat, lon + dlon
+
+
+def build_extreme_wind_warning_polygon(center_lat, center_lon, heading_deg, forward_speed, r_max, v_max):
+    """
+    Build a realistic warning polygon elongated along the storm motion.
+    Shapes the polygon more like a real NWS downstream wind warning.
+    """
+    # scale polygon length/width by storm size and motion
+    lead_miles = max(22, min(70, r_max * 1.6 + forward_speed * 1.5))
+    trail_miles = max(8, min(22, r_max * 0.55))
+    half_width_left = max(8, min(24, r_max * 0.60))
+    half_width_right = max(10, min(30, r_max * 0.75))
+
+    # front center / rear center of polygon axis
+    front_lat, front_lon = offset_latlon(center_lat, center_lon, lead_miles, heading_deg)
+    rear_lat, rear_lon = offset_latlon(center_lat, center_lon, trail_miles, heading_deg + 180)
+
+    # left/right bearings relative to motion
+    left_bearing = heading_deg - 90
+    right_bearing = heading_deg + 90
+
+    # front corners
+    f_left_lat, f_left_lon = offset_latlon(front_lat, front_lon, half_width_left, left_bearing)
+    f_right_lat, f_right_lon = offset_latlon(front_lat, front_lon, half_width_right, right_bearing)
+
+    # rear corners
+    r_left_lat, r_left_lon = offset_latlon(rear_lat, rear_lon, half_width_left * 0.72, left_bearing)
+    r_right_lat, r_right_lon = offset_latlon(rear_lat, rear_lon, half_width_right * 0.72, right_bearing)
+
+    # small extra point near front-right for a more NWS-style "pushed" polygon
+    tip_lat, tip_lon = offset_latlon(front_lat, front_lon, max(4, r_max * 0.25), heading_deg + 20)
+
+    polygon = [
+        [r_left_lat, r_left_lon],
+        [f_left_lat, f_left_lon],
+        [tip_lat, tip_lon],
+        [f_right_lat, f_right_lon],
+        [r_right_lat, r_right_lon],
+    ]
+    return polygon
+
+
+def pick_impacted_places(polygon, city_points, max_places=6):
+    """
+    Pick city labels that are closest to or inside the warning polygon envelope.
+    This is synthetic but gives a realistic impacted-place list.
+    """
+    lats = [pt[0] for pt in polygon]
+    lons = [pt[1] for pt in polygon]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+
+    candidates = []
+    center_lat = np.mean(lats)
+    center_lon = np.mean(lons)
+
+    for name, (lat, lon) in city_points.items():
+        pad = 0.08
+        if (min_lat - pad) <= lat <= (max_lat + pad) and (min_lon - pad) <= lon <= (max_lon + pad):
+            dist = np.hypot((lat - center_lat) * 69, (lon - center_lon) * 53)
+            candidates.append((dist, name))
+
+    candidates = sorted(candidates, key=lambda x: x[0])
+    return [name for _, name in candidates[:max_places]]
+
+
+def generate_fake_ugc():
+    """Synthetic UGC-like code for display only."""
+    county_part = str(np.random.randint(3, 9)).zfill(3)
+    zone_part = str(np.random.randint(1, 999)).zfill(3)
+    return f"ALC{county_part}-{zone_part}"
+
+
+def generate_extreme_wind_warning_text(
+    polygon,
+    landfall_lat,
+    landfall_lon,
+    current_lat,
+    current_lon,
+    heading_deg,
+    v_max,
+    wind_mph,
+    gust_mph,
+    selected_places,
+):
+    """
+    Example warning text styled like NWS formatting, but clearly synthetic.
+    """
+    issue_hour = np.random.randint(1, 12)
+    issue_min = np.random.choice([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55])
+    expire_min = (issue_min + 45) % 60
+    ugc = generate_fake_ugc()
+
+    lat1, lon1 = polygon[0]
+    lat2, lon2 = polygon[1]
+    lat3, lon3 = polygon[2]
+    lat4, lon4 = polygon[3]
+    lat5, lon5 = polygon[4]
+
+    places_line = ", ".join(selected_places) if selected_places else "portions of coastal Mobile County"
+
+    text = f\"\"\"BULLETIN - EAS ACTIVATION REQUESTED
+Extreme Wind Warning
+National Weather Service Mobile AL
+{issue_hour:02d}{issue_min:02d} PM CDT Mon Apr 13 2026
+
+...THIS IS A SYNTHETIC EXAMPLE WARNING FOR SANDBOX DISPLAY...
+...EXTREME WIND WARNING FOR SOUTHERN MOBILE COUNTY...
+
+* WHAT...Widespread destructive winds of {int(round(wind_mph))} to {int(round(gust_mph))} mph associated with the inner core of a major hurricane.
+
+* WHERE...Including {places_line}.
+
+* WHEN...Until {issue_hour:02d}{expire_min:02d} PM CDT.
+
+* IMPACTS...Expect extremely dangerous winds capable of producing extensive structural damage, downed trees, blocked roads, and prolonged power outages. Shelter in the interior portion of a well-built structure away from windows.
+
+* ADDITIONAL DETAILS...
+At {issue_hour:02d}{issue_min:02d} PM CDT, the simulated landfalling eyewall was centered near {current_lat:.2f}N {abs(current_lon):.2f}W, moving {deg_to_compass(heading_deg)} at {int(round((np.hypot(current_lat-landfall_lat, current_lon-landfall_lon) * 69)))} mph.
+Landfall reference point: {landfall_lat:.2f}N {abs(landfall_lon):.2f}W.
+Maximum sustained winds were estimated near {int(round(kt_to_mph(v_max)))} mph.
+
+LAT...LON {int(lat1*100):04d} {int(abs(lon1)*100):04d} {int(lat2*100):04d} {int(abs(lon2)*100):04d} {int(lat3*100):04d} {int(abs(lon3)*100):04d}
+      {int(lat4*100):04d} {int(abs(lon4)*100):04d} {int(lat5*100):04d} {int(abs(lon5)*100):04d}
+
+$$
+{ugc}
+\"\"\"
+    return text
 
 # -----------------------------
 # 5. SESSION STATE
@@ -810,6 +950,9 @@ with st.sidebar:
 
     with st.expander("⚠️ Warning Settings", expanded=False):
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
+        show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
+        extreme_wind_threshold_mph = st.slider("Extreme Wind Warning Trigger (mph)", 80, 140, 115)
+        show_warning_text_panel = st.checkbox("Show Example Warning Text", value=True)
         surge_threshold = st.slider("Warning Trigger (ft)", 3, 12, 6)
         show_zone_boxes = st.checkbox("Show Zone Boxes", value=True)
         show_city_markers = st.checkbox("Show City Markers", value=True)
@@ -881,6 +1024,40 @@ pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
 storm_class = saffir_simpson_category(v_max)
 forecast_track = build_forecast_track(l_lat, l_lon, f_speed, f_dir)
 
+landfall_env = compute_local_environment(
+    l_lat, l_lon, current_lat, current_lon, p, radar_coords, front_lat,
+    pressure_drop_hpa=pressure_drop_hpa,
+    dry_air=dry_air,
+    urban_heat=urban_heat,
+    ewr_phase=ewr_phase,
+)
+
+warning_polygon = None
+warning_places = []
+example_warning_text = ""
+
+if landfall_env["gust_mph"] >= extreme_wind_threshold_mph:
+    warning_polygon = build_extreme_wind_warning_polygon(
+        l_lat,
+        l_lon,
+        f_dir,
+        f_speed,
+        r_max,
+        v_max,
+    )
+    warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
+    example_warning_text = generate_extreme_wind_warning_text(
+        warning_polygon,
+        l_lat,
+        l_lon,
+        current_lat,
+        current_lon,
+        f_dir,
+        v_max,
+        landfall_env["wind_mph"],
+        landfall_env["gust_mph"],
+        warning_places,
+    )
 
 # -----------------------------
 # 7. MAP & DASHBOARD
@@ -1071,6 +1248,35 @@ with c1:
         fill_color="#ffd700", tooltip=f"Selected City: {selected_city}"
     ).add_to(m)
 
+    if show_extreme_wind_warning and warning_polygon is not None:
+        folium.Polygon(
+            locations=warning_polygon,
+            color="#ff4d4d",
+            weight=3,
+            fill=True,
+            fill_color="#ff4d4d",
+            fill_opacity=0.18,
+            tooltip=f"Extreme Wind Warning Example • Gusts up to {landfall_env['gust_mph']:.0f} mph",
+        ).add_to(m)
+
+        # polygon label near centroid
+        poly_center_lat = np.mean([pt[0] for pt in warning_polygon])
+        poly_center_lon = np.mean([pt[1] for pt in warning_polygon])
+
+        folium.map.Marker(
+            [poly_center_lat, poly_center_lon],
+            icon=DivIcon(
+                icon_size=(220, 18),
+                icon_anchor=(0, 0),
+                html=(
+                    "<div style='font-size:11px;color:#ffcccc;"
+                    "font-weight:bold;text-shadow:0 0 4px black;'>"
+                    "EXTREME WIND WARNING"
+                    "</div>"
+                ),
+            ),
+        ).add_to(m)
+    
     if show_warnings:
         for zone_name, meta in ZONES.items():
             zlat, zlon = meta["center"]
@@ -1092,6 +1298,13 @@ with c1:
     add_map_legend(m, radar_view)
     folium.LayerControl(collapsed=False).add_to(m)
 
+    Fullscreen(
+        position="topright",
+        title="Full Screen",
+        title_cancel="Exit Full Screen",
+        force_separate_button=True,
+    ).add_to(m)
+    
     map_data = st_folium(
         m,
         width="100%",
@@ -1182,6 +1395,11 @@ with c2:
         unsafe_allow_html=True,
     )
 
+    if show_warning_text_panel and warning_polygon is not None:
+        st.divider()
+        st.subheader("🚨 Example Extreme Wind Warning")
+        st.code(example_warning_text, language="text")
+    
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
     k1.metric("DEW PT", f"{env['dewp_f']:.0f}°F")
