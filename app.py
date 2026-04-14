@@ -8,16 +8,26 @@ import time
 from geopy.geocoders import Nominatim
 
 # =========================================================
-# LHIM MOBILE COUNTY v3.0
-# Extended from the user's original v2.9 code.
-# Keeps original core structure while ADDING:
-# - 12 Mobile County forecast zones
-# - zone/city dropdown system
-# - dynamic local parameter calculations
-# - dynamically calculated wind, gust, temp, dewpoint,
-#   visibility, rain direction, surge, tornado risk
-# - 6 hour location forecast
-# - county zone summary table
+# LHIM MOBILE COUNTY v4.0 HYPERREALISTIC
+# Built as a drop-in extension of the user's v3.0 sandbox.
+#
+# Added without changing the core idea:
+# - Realistic on-map legends for every parameter mode
+# - NWS-style reflectivity palette
+# - Dual wind units (kt + mph)
+# - Pressure estimates / pressure tendency
+# - Multi-point forecast track (0/6/12/24/36/48h)
+# - Cone of uncertainty rendering
+# - Satellite / street / dark base map toggle
+# - Optional traffic tile toggle hook (requires tile URL/API)
+# - Radar beam degradation / beam height / cone of silence effects
+# - Optional eyewall replacement cycle structure
+# - Inland decay / land interaction refinement
+# - Cleaner professional map symbology / advisory panel
+#
+# NOTE:
+# True live traffic overlays generally require an external provider/API.
+# This app supports it if you provide a tile URL in the sidebar.
 # =========================================================
 
 # -----------------------------
@@ -37,7 +47,58 @@ def get_sst_mult(month, sst_boost=False):
     return base * 1.2 if sst_boost else base
 
 
-def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.0, front_lat=None, terrain_friction=1.0):
+def normalize_angle(deg):
+    return deg % 360
+
+
+def deg_to_compass(deg):
+    directions = [
+        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+    ]
+    idx = int((normalize_angle(deg) + 11.25) / 22.5) % 16
+    return directions[idx]
+
+
+def kt_to_mph(kts):
+    return kts * 1.15078
+
+
+def calculate_mslp(v_max, pressure_drop_hpa):
+    # Synthetic but realistic-facing pressure estimate.
+    # Keeps original sandbox spirit while presenting an interpretable value.
+    return max(860.0, 1012.0 - pressure_drop_hpa - (v_max * 0.55))
+
+
+def calculate_pressure_tendency_mbhr(pressure_drop_hpa):
+    return pressure_drop_hpa / 6.0
+
+
+def saffir_simpson_category(v_max_kts):
+    mph = kt_to_mph(v_max_kts)
+    if mph < 39:
+        return "Tropical Depression"
+    if mph < 74:
+        return "Tropical Storm"
+    if mph < 96:
+        return "Category 1"
+    if mph < 111:
+        return "Category 2"
+    if mph < 130:
+        return "Category 3"
+    if mph < 157:
+        return "Category 4"
+    return "Category 5"
+
+
+def calculate_full_physics(
+    lat, lon, s_lat, s_lon, p,
+    level=1000,
+    micro_scale=0.0,
+    front_lat=None,
+    terrain_friction=1.0,
+    inland_decay=True,
+):
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
@@ -67,16 +128,38 @@ def calculate_full_physics(lat, lon, s_lat, s_lon, p, level=1000, micro_scale=0.
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
 
     surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
+
+    # Inland decay / land interaction refinement.
+    if inland_decay:
+        if lat > 30.15:
+            inland_miles = (lat - 30.15) * 69
+            land_decay = max(0.72, np.exp(-inland_miles / 260.0))
+            surface_wind *= land_decay
+
     return surface_wind, np.degrees(wind_angle_rad), r
 
 
-def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_scale=0.0, front_lat=None, terrain_friction=1.0, coastal_exposure=1.0):
+def get_synthetic_products(
+    lat,
+    lon,
+    s_lat,
+    s_lon,
+    p,
+    radar_coords=None,
+    micro_scale=0.0,
+    front_lat=None,
+    terrain_friction=1.0,
+    coastal_exposure=1.0,
+    ewr_phase=0.0,
+    radar_decay=True,
+    cone_of_silence=True,
+):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
     w, wd, r = calculate_full_physics(
         lat, lon, s_lat, s_lon, p,
         micro_scale=micro_scale,
         front_lat=front_lat,
-        terrain_friction=terrain_friction
+        terrain_friction=terrain_friction,
     )
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
 
@@ -92,6 +175,12 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
     bands = max(0, np.sin(r / (r_max * 0.8) - angle * 3.0) * 35 * np.exp(-r / 200))
     front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > front_lat - 0.5) else 0
 
+    # Eyewall replacement cycle structure.
+    if ewr_phase > 0:
+        outer_ring = 0.72 * 65 * np.exp(-((r - (r_max * 1.8)) ** 2) / (r_max * 0.58) ** 2)
+        eyewall = eyewall * (1 - min(1.0, ewr_phase))
+        bands = max(bands, outer_ring)
+
     dbz = max(eyewall, shield, bands, front_rain) * symmetry
     if r < r_max * (0.15 if is_major else 0.4):
         dbz *= 0.1
@@ -101,25 +190,38 @@ def get_synthetic_products(lat, lon, s_lat, s_lon, p, radar_coords=None, micro_s
         angle_to_radar = np.arctan2(rdy, rdx)
         radial_v = (w * 1.15) * np.cos(np.radians(wd) - angle_to_radar)
         aliased_v = np.clip(radial_v, -149, 149)
+
+        range_mi = np.sqrt(rdx**2 + rdy**2)
+        range_km = range_mi * 1.60934
+        beam_height_km = 0.018 * (range_km ** 1.12)
+
+        if radar_decay:
+            dbz *= np.exp(-range_km / 320.0)
+            aliased_v *= np.exp(-range_km / 420.0)
+
+        if cone_of_silence and range_km < 7:
+            dbz *= 0.35
+            aliased_v *= 0.25
+
+        if beam_height_km > 7.0:
+            dbz *= 0.65
+            aliased_v *= 0.70
     else:
         aliased_v = 0
+        beam_height_km = 0.0
 
     surge = 0
-    # original rough coastal envelope retained, but exposure weighting added
     if 30.00 <= lat <= 30.55:
         dist_mult = np.exp(-abs(lat - 30.25) * 5)
         surge = (w ** 1.9 / 1700) * (1.8 if lon > s_lon else -0.5) * dist_mult * coastal_exposure
 
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
-    return min(78, dbz), aliased_v, surge, prob
+    return min(78, dbz), aliased_v, surge, prob, beam_height_km
 
 
 # -----------------------------
 # 2. MOBILE COUNTY ZONES & CITIES
 # -----------------------------
-
-# These are practical forecast sub-zones for Mobile County only.
-# Bounds are simplified rectangles for fast Streamlit rendering.
 ZONES = {
     "Citronelle": {
         "center": (31.090, -88.230),
@@ -247,12 +349,38 @@ RADAR_SITES = {
 }
 
 
+# -----------------------------
+# 3. COLOR TABLES / LEGENDS
+# -----------------------------
+def nws_reflectivity_color(dbz):
+    if dbz < 5:
+        return None
+    if dbz < 20:
+        return "#04e9e7"
+    if dbz < 25:
+        return "#019ff4"
+    if dbz < 30:
+        return "#0300f4"
+    if dbz < 35:
+        return "#02fd02"
+    if dbz < 40:
+        return "#01c501"
+    if dbz < 45:
+        return "#008e00"
+    if dbz < 50:
+        return "#fdf802"
+    if dbz < 55:
+        return "#e5bc00"
+    if dbz < 60:
+        return "#fd9500"
+    if dbz < 65:
+        return "#fd0000"
+    if dbz < 70:
+        return "#d40000"
+    return "#bc00bc"
+
+
 def velocity_color_hyperrealistic(vel):
-    """Hyperrealistic dark velocity table from -149 to +149 mph.
-    Negative velocities use darker greens/cyans into icy teal.
-    Positive velocities use darker reds/maroons into magenta.
-    Near-zero values stay transparent.
-    """
     if abs(vel) < 3:
         return None
 
@@ -322,13 +450,136 @@ def velocity_color_hyperrealistic(vel):
             return "#8d1bc2"
 
 
+def surge_color(surge):
+    if abs(surge) < 0.5:
+        return None
+    if surge <= 0:
+        return "#00ced1"
+    if surge <= 3:
+        return "#ffd700"
+    if surge <= 6:
+        return "#ff8c00"
+    if surge <= 9:
+        return "#ff0000"
+    if surge <= 12:
+        return "#8b0000"
+    return "#4b0082"
+
+
+def wind_prob_color(prob):
+    if prob <= 0:
+        return None
+    if prob >= 90:
+        return "#ff00ff"
+    if prob >= 60:
+        return "#ff8c00"
+    return "#ffff00"
+
+
+def add_map_legend(m, radar_view):
+    if radar_view == "Reflectivity (dBZ)":
+        legend_html = """
+        <div style="
+        position: fixed;
+        bottom: 18px; left: 18px; z-index: 9999;
+        background: rgba(0,0,0,0.88);
+        color: white;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        min-width: 175px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.45);
+        ">
+        <b>Reflectivity (dBZ)</b><br>
+        <span style='color:#04e9e7'>■</span> 5-20 Light<br>
+        <span style='color:#019ff4'>■</span> 20-25 Light-Mod<br>
+        <span style='color:#0300f4'>■</span> 25-30 Moderate<br>
+        <span style='color:#02fd02'>■</span> 30-35 Moderate/Heavy<br>
+        <span style='color:#01c501'>■</span> 35-40 Heavy<br>
+        <span style='color:#008e00'>■</span> 40-45 Very Heavy<br>
+        <span style='color:#fdf802'>■</span> 45-50 Intense<br>
+        <span style='color:#fd9500'>■</span> 55-60 Extreme<br>
+        <span style='color:#fd0000'>■</span> 60-65 Violent<br>
+        <span style='color:#bc00bc'>■</span> 70+ Core / Hail-like
+        </div>
+        """
+    elif radar_view == "Velocity (kts)":
+        legend_html = """
+        <div style="
+        position: fixed;
+        bottom: 18px; left: 18px; z-index: 9999;
+        background: rgba(0,0,0,0.88);
+        color: white;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        min-width: 185px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.45);
+        ">
+        <b>Radial Velocity (kts)</b><br>
+        <span style='color:#16956b'>■</span> Inbound 20-70<br>
+        <span style='color:#0f78a3'>■</span> Inbound 70-110<br>
+        <span style='color:#2c1fcf'>■</span> Inbound 110-149<br>
+        <span style='color:#861616'>■</span> Outbound 20-50<br>
+        <span style='color:#c3153a'>■</span> Outbound 80-90<br>
+        <span style='color:#8d1bc2'>■</span> Outbound 140-149<br>
+        Range: -149 to +149 kts
+        </div>
+        """
+    elif radar_view == "Storm Surge":
+        legend_html = """
+        <div style="
+        position: fixed;
+        bottom: 18px; left: 18px; z-index: 9999;
+        background: rgba(0,0,0,0.88);
+        color: white;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        min-width: 165px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.45);
+        ">
+        <b>Storm Surge (ft)</b><br>
+        <span style='color:#00ced1'>■</span> Offshore / negative<br>
+        <span style='color:#ffd700'>■</span> 1-3<br>
+        <span style='color:#ff8c00'>■</span> 3-6<br>
+        <span style='color:#ff0000'>■</span> 6-9<br>
+        <span style='color:#8b0000'>■</span> 9-12<br>
+        <span style='color:#4b0082'>■</span> 12+
+        </div>
+        """
+    else:
+        legend_html = """
+        <div style="
+        position: fixed;
+        bottom: 18px; left: 18px; z-index: 9999;
+        background: rgba(0,0,0,0.88);
+        color: white;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 12px;
+        min-width: 170px;
+        box-shadow: 0 0 12px rgba(0,0,0,0.45);
+        ">
+        <b>Wind Probability</b><br>
+        <span style='color:#ffff00'>■</span> 30% Possible<br>
+        <span style='color:#ff8c00'>■</span> 60% Likely<br>
+        <span style='color:#ff00ff'>■</span> 90% Near Certain
+        </div>
+        """
+
+    m.get_root().html.add_child(folium.Element(legend_html))
+
+
+# -----------------------------
+# 4. ZONE / ENVIRONMENT HELPERS
+# -----------------------------
 def get_zone_for_point(lat, lon):
     for zone_name, meta in ZONES.items():
         (lat1, lon1), (lat2, lon2) = meta["bounds"]
         if min(lat1, lat2) <= lat <= max(lat1, lat2) and min(lon1, lon2) <= lon <= max(lon1, lon2):
             return zone_name
 
-    # nearest-center fallback
     nearest = min(
         ZONES.keys(),
         key=lambda z: np.hypot((lat - ZONES[z]["center"][0]) * 69, (lon - ZONES[z]["center"][1]) * 53)
@@ -341,32 +592,19 @@ def get_zone_meta(lat, lon):
     return zone_name, ZONES[zone_name]
 
 
-# -----------------------------
-# 3. DERIVED ENVIRONMENTAL METRICS
-# -----------------------------
-
-def normalize_angle(deg):
-    return deg % 360
-
-
-def deg_to_compass(deg):
-    directions = [
-        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
-    ]
-    idx = int((normalize_angle(deg) + 11.25) / 22.5) % 16
-    return directions[idx]
-
-
-def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_hpa=32, dry_air=0, urban_heat=0):
+def compute_local_environment(
+    lat, lon, s_lat, s_lon, p, radar_coords, front_lat,
+    pressure_drop_hpa=32, dry_air=0, urban_heat=0, ewr_phase=0.0
+):
     zone_name, zone_meta = get_zone_meta(lat, lon)
 
-    dbz, vel, surge_raw, prob = get_synthetic_products(
+    dbz, vel, surge_raw, prob, beam_height_km = get_synthetic_products(
         lat, lon, s_lat, s_lon, p,
         radar_coords=radar_coords,
         front_lat=front_lat,
         terrain_friction=zone_meta["terrain_friction"],
         coastal_exposure=zone_meta["coastal_exposure"],
+        ewr_phase=ewr_phase,
     )
 
     w_kts, wd, r = calculate_full_physics(
@@ -384,7 +622,6 @@ def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat
     gust_factor = 1.18 + (0.0018 * w_kts) + (zone_meta["urban_factor"] * 0.08)
     gust = w_kts * gust_factor
 
-    # temperature / dewpoint
     t_base = 84 if sst_mult >= 1.15 else 81
     temp_f = (
         t_base
@@ -398,7 +635,6 @@ def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat
     dewp_f = temp_f - max(1.5, (100 - rh + dry_air) * 0.16)
     dewp_f = min(dewp_f, temp_f)
 
-    # visibility in miles
     rain_factor = dbz / 75
     wind_reduction = min(1.2, w_kts / 120)
     vis_mi = 10 - (rain_factor * 7.2) - (wind_reduction * 1.4)
@@ -406,17 +642,14 @@ def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat
         vis_mi -= 0.4
     vis_mi = float(np.clip(vis_mi, 0.2, 10.0))
 
-    # rain direction approximated by low-level inflow toward center with band curvature
     dx = (lon - s_lon) * 53
     dy = (lat - s_lat) * 69
     storm_bearing_from_center = np.degrees(np.arctan2(dx, dy)) % 360
     inflow_dir = (storm_bearing_from_center + 180 - 20) % 360
     rain_dir = normalize_angle(inflow_dir + (shear_mag * 0.15) - ((1 - symmetry) * 25))
 
-    # surge adjusted by zone bias and coastal exposure
     surge_ft = max(0.0, surge_raw + zone_meta["surge_bias"] + (zone_meta["coastal_exposure"] * 0.6))
 
-    # tornado risk: 0-100
     right_front_bonus = max(0, np.cos(np.radians((storm_bearing_from_center - f_dir) - 45)))
     shear_term = np.clip((shear_mag - 10) / 40, 0, 1)
     moisture_term = np.clip((rh - 65) / 30, 0, 1)
@@ -442,10 +675,15 @@ def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat
     else:
         tornado_label = "Low"
 
+    wind_mph = kt_to_mph(w_kts)
+    gust_mph = kt_to_mph(gust)
+
     return {
         "zone": zone_name,
         "wind_kts": float(w_kts),
         "gust_kts": float(gust),
+        "wind_mph": float(wind_mph),
+        "gust_mph": float(gust_mph),
         "temp_f": float(temp_f),
         "dewp_f": float(dewp_f),
         "visibility_mi": vis_mi,
@@ -460,6 +698,7 @@ def compute_local_environment(lat, lon, s_lat, s_lon, p, radar_coords, front_lat
         "wind_dir_deg": float(normalize_angle(wd)),
         "wind_dir_text": deg_to_compass(wd),
         "radius_mi": float(r),
+        "beam_height_km": float(beam_height_km),
     }
 
 
@@ -480,7 +719,7 @@ def condition_from_wind(w_kts, radius_mi, r_max):
     return f"EYEWALL: {w_desc}" if radius_mi < r_max * 1.2 else f"{w_desc} / RAIN"
 
 
-def zone_summary_table(s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_hpa, dry_air, urban_heat):
+def zone_summary_table(s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_hpa, dry_air, urban_heat, ewr_phase):
     rows = []
     for zone_name, meta in ZONES.items():
         lat, lon = meta["center"]
@@ -489,11 +728,12 @@ def zone_summary_table(s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_h
             pressure_drop_hpa=pressure_drop_hpa,
             dry_air=dry_air,
             urban_heat=urban_heat,
+            ewr_phase=ewr_phase,
         )
         rows.append({
             "Zone": zone_name,
-            "Wind": f"{env['wind_kts']:.0f} kt",
-            "Gust": f"{env['gust_kts']:.0f} kt",
+            "Wind": f"{env['wind_kts']:.0f} kt / {env['wind_mph']:.0f} mph",
+            "Gust": f"{env['gust_kts']:.0f} kt / {env['gust_mph']:.0f} mph",
             "Temp": f"{env['temp_f']:.0f}°F",
             "Dewpoint": f"{env['dewp_f']:.0f}°F",
             "Visibility": f"{env['visibility_mi']:.1f} mi",
@@ -504,8 +744,35 @@ def zone_summary_table(s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_h
     return pd.DataFrame(rows)
 
 
+def forecast_cone_radius_mi(hour):
+    radii = {
+        0: 10,
+        6: 18,
+        12: 28,
+        24: 45,
+        36: 65,
+        48: 85,
+    }
+    return radii.get(hour, 40)
+
+
+def build_forecast_track(l_lat, l_lon, f_speed, f_dir):
+    points = []
+    for hour in [0, 6, 12, 24, 36, 48]:
+        dist_moved = (f_speed * hour) / 69.0
+        f_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
+        f_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
+        points.append({
+            "hour": hour,
+            "lat": f_lat,
+            "lon": f_lon,
+            "cone_radius_mi": forecast_cone_radius_mi(hour),
+        })
+    return points
+
+
 # -----------------------------
-# 4. SESSION STATE
+# 5. SESSION STATE
 # -----------------------------
 if "active_radar" not in st.session_state:
     st.session_state.active_radar = "KMOB"
@@ -514,29 +781,47 @@ if "loop_idx" not in st.session_state:
 if "is_playing" not in st.session_state:
     st.session_state.is_playing = False
 
-geolocator = Nominatim(user_agent="lhim_mobile_county_v30")
+geolocator = Nominatim(user_agent="lhim_mobile_county_v40_hyperrealistic")
 
 
 # -----------------------------
-# 5. UI & SIDEBAR
+# 6. UI & SIDEBAR
 # -----------------------------
-st.set_page_config(layout="wide", page_title="LHIM Mobile County v3.0 | Parameter Impact Mode")
+st.set_page_config(layout="wide", page_title="LHIM Mobile County v4.0 | Hyperrealistic Mode")
 
 with st.sidebar:
-    st.title("🛡️ LHIM Mobile County v3.0")
+    st.title("🛡️ LHIM Mobile County v4.0")
     radar_view = st.radio(
         "Display Mode",
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
+
+    with st.expander("🗺️ Base Map Controls", expanded=True):
+        basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
+        enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
+        enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
+        enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
+        enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
+        traffic_tile_url = st.text_input(
+            "Traffic Tile URL (optional / provider required)",
+            value="",
+            help="Paste a valid traffic tile endpoint if you have one. True live traffic usually requires a provider/API key."
+        )
 
     with st.expander("⚠️ Warning Settings", expanded=False):
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         surge_threshold = st.slider("Warning Trigger (ft)", 3, 12, 6)
         show_zone_boxes = st.checkbox("Show Zone Boxes", value=True)
         show_city_markers = st.checkbox("Show City Markers", value=True)
+        show_forecast_track = st.checkbox("Show Forecast Track", value=True)
+        show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
 
     st.subheader("📡 Radar Controls")
-    st.session_state.active_radar = st.selectbox("Radar Site", list(RADAR_SITES.keys()), index=list(RADAR_SITES.keys()).index(st.session_state.active_radar))
+    st.session_state.active_radar = st.selectbox(
+        "Radar Site",
+        list(RADAR_SITES.keys()),
+        index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
+    )
     run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
     st.session_state.is_playing = run_loop
     current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
@@ -554,6 +839,7 @@ with st.sidebar:
         pressure_drop_hpa = st.slider("Pressure Fall Signal (hPa)", 0, 60, 32)
         dry_air = st.slider("Dry Air Entrapment", 0, 40, 8)
         urban_heat = st.slider("Urban Heat Bias", 0.0, 4.0, 1.2, 0.1)
+        ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
 
     st.subheader("🌀 Storm Structure")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
@@ -570,8 +856,8 @@ with st.sidebar:
     use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
 
 
-# current storm position from original logic
-# retained, but parameter list now uses sidebar values directly
+# current storm position
+# retained from original logic
 
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
@@ -590,15 +876,71 @@ p = [
 ]
 
 radar_coords = RADAR_SITES[st.session_state.active_radar]
+mslp = calculate_mslp(v_max, pressure_drop_hpa)
+pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
+storm_class = saffir_simpson_category(v_max)
+forecast_track = build_forecast_track(l_lat, l_lon, f_speed, f_dir)
 
 
 # -----------------------------
-# 6. MAP & DASHBOARD
+# 7. MAP & DASHBOARD
 # -----------------------------
 c1, c2 = st.columns([4, 1.8])
 
 with c1:
-    m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles="CartoDB DarkMatter")
+    if basemap_mode == "Dark":
+        tiles = None
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=True).add_to(m)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=False,
+            ).add_to(m)
+    elif basemap_mode == "Street":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=True).add_to(m)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=False,
+            ).add_to(m)
+    else:
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=True,
+            ).add_to(m)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+
+    if enable_traffic and traffic_tile_url.strip():
+        folium.TileLayer(
+            tiles=traffic_tile_url.strip(),
+            attr="Traffic Provider",
+            name="Traffic",
+            overlay=True,
+            control=True,
+            opacity=0.75,
+        ).add_to(m)
 
     lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
     lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
@@ -607,40 +949,24 @@ with c1:
     for lt in lats:
         for ln in lons:
             zone_name, zone_meta = get_zone_meta(lt, ln)
-            dbz, vel, surge, prob = get_synthetic_products(
+            dbz, vel, surge, prob, beam_height_km = get_synthetic_products(
                 lt, ln, current_lat, current_lon, p,
                 radar_coords=radar_coords,
                 front_lat=front_lat,
                 terrain_friction=zone_meta["terrain_friction"],
                 coastal_exposure=zone_meta["coastal_exposure"],
+                ewr_phase=ewr_phase,
             )
             color = None
 
-            if radar_view == "Reflectivity (dBZ)" and dbz > 15:
-                color = (
-                    "#ff00ff" if dbz > 65 else
-                    "#ff0000" if dbz > 50 else
-                    "#ff9900" if dbz > 40 else
-                    "#ffff00" if dbz > 28 else
-                    "#00ff00"
-                )
+            if radar_view == "Reflectivity (dBZ)":
+                color = nws_reflectivity_color(dbz)
             elif radar_view == "Velocity (kts)":
                 color = velocity_color_hyperrealistic(vel)
-            elif radar_view == "Storm Surge" and abs(surge) > 0.5:
-                color = (
-                    "#4b0082" if surge > 12 else
-                    "#8b0000" if surge > 9 else
-                    "#ff0000" if surge > 6 else
-                    "#ff8c00" if surge > 3 else
-                    "#ffd700" if surge > 0 else
-                    "#00ced1"
-                )
-            elif radar_view == "Wind Prob." and prob > 0:
-                color = (
-                    "#ff00ff" if prob >= 90 else
-                    "#ff8c00" if prob >= 60 else
-                    "#ffff00"
-                )
+            elif radar_view == "Storm Surge":
+                color = surge_color(surge)
+            elif radar_view == "Wind Prob.":
+                color = wind_prob_color(prob)
 
             if color:
                 folium.Rectangle(
@@ -651,7 +977,6 @@ with c1:
                     weight=0,
                 ).add_to(m)
 
-    # zone overlays
     if show_zone_boxes:
         for zone_name, meta in ZONES.items():
             (lat1, lon1), (lat2, lon2) = meta["bounds"]
@@ -674,7 +999,6 @@ with c1:
                 ),
             ).add_to(m)
 
-    # city markers
     if show_city_markers:
         for city_name, (ct_lat, ct_lon) in CITY_POINTS.items():
             folium.CircleMarker(
@@ -687,7 +1011,48 @@ with c1:
                 tooltip=city_name,
             ).add_to(m)
 
-    # storm center and selected zone/city markers
+    if show_forecast_track:
+        track_coords = [(pt["lat"], pt["lon"]) for pt in forecast_track]
+        folium.PolyLine(track_coords, color="#ffffff", weight=2.2, opacity=0.85, tooltip="Forecast Track").add_to(m)
+
+        for pt in forecast_track:
+            hour = pt["hour"]
+            lat = pt["lat"]
+            lon = pt["lon"]
+            cone_radius_mi = pt["cone_radius_mi"]
+
+            if show_cone:
+                folium.Circle(
+                    location=[lat, lon],
+                    radius=cone_radius_mi * 1609.34,
+                    color="#b7d8ff",
+                    fill=True,
+                    fill_color="#b7d8ff",
+                    fill_opacity=0.08,
+                    weight=1,
+                    opacity=0.35,
+                    tooltip=f"{hour}h cone radius ~{cone_radius_mi} mi",
+                ).add_to(m)
+
+            folium.CircleMarker(
+                location=[lat, lon],
+                radius=5 if hour else 7,
+                color="#ffffff",
+                fill=True,
+                fill_color="#ff4d4d" if hour == 0 else "#ffffff",
+                fill_opacity=0.95,
+                tooltip=f"Forecast Point T+{hour}h",
+            ).add_to(m)
+
+            folium.map.Marker(
+                [lat, lon],
+                icon=DivIcon(
+                    icon_size=(45, 14),
+                    icon_anchor=(0, 0),
+                    html=f"<div style='font-size:10px;color:white;text-shadow:0 0 3px black;'>+{hour}h</div>",
+                ),
+            ).add_to(m)
+
     folium.Marker(
         [current_lat, current_lon],
         tooltip="Storm Center",
@@ -711,7 +1076,7 @@ with c1:
             zlat, zlon = meta["center"]
             env = compute_local_environment(
                 zlat, zlon, current_lat, current_lon, p, radar_coords, front_lat,
-                pressure_drop_hpa=pressure_drop_hpa, dry_air=dry_air, urban_heat=urban_heat,
+                pressure_drop_hpa=pressure_drop_hpa, dry_air=dry_air, urban_heat=urban_heat, ewr_phase=ewr_phase,
             )
             if env["surge_ft"] >= surge_threshold:
                 folium.Circle(
@@ -723,6 +1088,9 @@ with c1:
                     opacity=0.85,
                     tooltip=f"{zone_name} surge warning: {env['surge_ft']:.1f} ft",
                 ).add_to(m)
+
+    add_map_legend(m, radar_view)
+    folium.LayerControl(collapsed=False).add_to(m)
 
     map_data = st_folium(
         m,
@@ -748,6 +1116,14 @@ with c2:
             font-size: 0.82rem;
             color: #b7d8ff;
             line-height: 1.25;
+        }
+        .advisory-box {
+            background-color: #0f1117;
+            color: #e9eef7;
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid #2a3950;
+            margin-bottom: 10px;
         }
         </style>
         """,
@@ -779,6 +1155,7 @@ with c2:
         pressure_drop_hpa=pressure_drop_hpa,
         dry_air=dry_air,
         urban_heat=urban_heat,
+        ewr_phase=ewr_phase,
     )
 
     st.markdown(
@@ -792,16 +1169,31 @@ with c2:
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        f"""
+        <div class='advisory-box'>
+            <b>Storm Classification:</b> {storm_class}<br>
+            <b>Estimated MSLP:</b> {mslp:.0f} mb<br>
+            <b>Pressure Tendency:</b> {pressure_tendency:.1f} mb/hr<br>
+            <b>Max Sustained:</b> {v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph<br>
+            <b>Radar Site:</b> {st.session_state.active_radar}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
     k1.metric("DEW PT", f"{env['dewp_f']:.0f}°F")
     k1.metric("VISIBILITY", f"{env['visibility_mi']:.1f} mi")
     k1.metric("SURGE", f"{env['surge_ft']:.1f} ft")
+    k1.metric("BEAM HT", f"{env['beam_height_km']:.1f} km")
 
-    k2.metric("WIND", f"{env['wind_kts']:.0f} kt")
-    k2.metric("GUST", f"{env['gust_kts']:.0f} kt")
+    k2.metric("WIND", f"{env['wind_kts']:.0f} kt / {env['wind_mph']:.0f} mph")
+    k2.metric("GUST", f"{env['gust_kts']:.0f} kt / {env['gust_mph']:.0f} mph")
     k2.metric("RAIN DIR", env['rain_dir_text'])
     k2.metric("TORNADO", f"{env['tornado_label']} ({env['tornado_risk']:.0f})")
+    k2.metric("RADAR VEL", f"{env['vel']:.0f} kt")
 
     st.divider()
     st.subheader("⏱️ 6-Hour Impact Forecast")
@@ -817,13 +1209,14 @@ with c2:
             pressure_drop_hpa=pressure_drop_hpa,
             dry_air=dry_air,
             urban_heat=urban_heat,
+            ewr_phase=ewr_phase,
         )
 
         forecast_rows.append({
             "Time": f"T+{hour}h",
             "Condition": condition_from_wind(f_env["wind_kts"], f_env["radius_mi"], r_max),
-            "Wind": f"{f_env['wind_kts']:.0f} kt",
-            "Gust": f"{f_env['gust_kts']:.0f} kt",
+            "Wind": f"{f_env['wind_kts']:.0f} kt / {f_env['wind_mph']:.0f} mph",
+            "Gust": f"{f_env['gust_kts']:.0f} kt / {f_env['gust_mph']:.0f} mph",
             "Temp": f"{f_env['temp_f']:.0f}°F",
             "Visibility": f"{f_env['visibility_mi']:.1f} mi",
             "Surge": f"{f_env['surge_ft']:.1f} ft",
@@ -833,6 +1226,28 @@ with c2:
     st.dataframe(pd.DataFrame(forecast_rows), hide_index=True, use_container_width=True)
 
     st.divider()
+    st.subheader("🧭 Multi-Point Forecast")
+    mp_rows = []
+    for pt in forecast_track:
+        f_env = compute_local_environment(
+            click_lat, click_lon, pt["lat"], pt["lon"], p, radar_coords, front_lat,
+            pressure_drop_hpa=pressure_drop_hpa,
+            dry_air=dry_air,
+            urban_heat=urban_heat,
+            ewr_phase=ewr_phase,
+        )
+        mp_rows.append({
+            "Forecast": f"+{pt['hour']}h",
+            "Storm Lat": f"{pt['lat']:.2f}",
+            "Storm Lon": f"{pt['lon']:.2f}",
+            "Cone Radius": f"{pt['cone_radius_mi']:.0f} mi",
+            "Local Wind": f"{f_env['wind_kts']:.0f} kt / {f_env['wind_mph']:.0f} mph",
+            "Local Surge": f"{f_env['surge_ft']:.1f} ft",
+            "Condition": condition_from_wind(f_env["wind_kts"], f_env["radius_mi"], r_max),
+        })
+    st.dataframe(pd.DataFrame(mp_rows), hide_index=True, use_container_width=True)
+
+    st.divider()
     st.subheader("🎯 Selected Zone Snapshot")
     zlat, zlon = ZONES[selected_zone]["center"]
     zenv = compute_local_environment(
@@ -840,11 +1255,12 @@ with c2:
         pressure_drop_hpa=pressure_drop_hpa,
         dry_air=dry_air,
         urban_heat=urban_heat,
+        ewr_phase=ewr_phase,
     )
     st.dataframe(pd.DataFrame([{
         "Zone": selected_zone,
-        "Wind": f"{zenv['wind_kts']:.0f} kt",
-        "Gust": f"{zenv['gust_kts']:.0f} kt",
+        "Wind": f"{zenv['wind_kts']:.0f} kt / {zenv['wind_mph']:.0f} mph",
+        "Gust": f"{zenv['gust_kts']:.0f} kt / {zenv['gust_mph']:.0f} mph",
         "Temp": f"{zenv['temp_f']:.0f}°F",
         "Dewpoint": f"{zenv['dewp_f']:.0f}°F",
         "Visibility": f"{zenv['visibility_mi']:.1f} mi",
@@ -855,7 +1271,7 @@ with c2:
 
 
 # -----------------------------
-# 7. COUNTY-WIDE ZONE TABLE
+# 8. COUNTY-WIDE ZONE TABLE
 # -----------------------------
 st.divider()
 st.subheader("📊 Mobile County 12-Zone Dynamic Summary")
@@ -868,12 +1284,13 @@ summary_df = zone_summary_table(
     pressure_drop_hpa,
     dry_air,
     urban_heat,
+    ewr_phase,
 )
 st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
 
 # -----------------------------
-# 8. AUTOMATED LOOP ENGINE
+# 9. AUTOMATED LOOP ENGINE
 # -----------------------------
 if st.session_state.is_playing:
     st.session_state.loop_idx += 1
