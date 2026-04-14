@@ -1564,7 +1564,7 @@ with c2:
         unsafe_allow_html=True,
     )
 
-        if show_warning_text_panel and warning_polygon is not None:
+    if show_warning_text_panel and warning_polygon is not None:
         st.divider()
         st.subheader("🚨 Example Extreme Wind Warning")
 
