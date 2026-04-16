@@ -822,23 +822,32 @@ def compute_local_environment(
     friction_recovery = 1 + ((1 - zone_meta["terrain_friction"]) * 0.15)
     w_kts = w_kts * coastal_boost * friction_recovery
 
-    # -----------------------------
-    # REALISTIC GUST LOGIC (FIXED)
-    # -----------------------------
-    if r < r_max:
-        gust_factor = 1.25
-    else:
-        gust_factor = 1.15
+# -----------------------------
+# URBAN / INLAND DECAY (NEW)
+# -----------------------------
+    urban = zone_meta["urban_factor"]  # 0 → rural, 1 → dense city
 
-    friction = 0.85 - (r / 300)
-    friction = max(0.6, min(friction, 0.9))
+# stronger decay with distance + urban density
+    inland_decay = np.clip((r / 80), 0, 1.5)   # ramps up inland
+    urban_penalty = 1 - (urban * 0.35 * inland_decay)
 
-    gust_kts = w_kts * gust_factor * friction
+# apply to sustained wind
+     w_kts = w_kts * urban_penalty      
 
-    if r > 20:
-        gust_kts = min(gust_kts, 130)
-    else:
-        gust_kts = min(gust_kts, 155)
+# -----------------------------
+# REALISTIC GUST LOGIC (IMPROVED)
+# -----------------------------
+if r < r_max:
+    gust_kts = w_kts * 1.20   # eyewall still strong
+else:
+    # inland: gusts weaken relative to sustained
+    inland_factor = np.clip(1 - (r / 120), 0.7, 1.0)
+    urban_factor = 1 - (zone_meta["urban_factor"] * 0.25)
+
+    gust_kts = w_kts * inland_factor * urban_factor
+
+# caps
+gust_kts = min(gust_kts, 155 if r < 20 else 130)
 
     # -----------------------------
     # TEMPERATURE / DEWPOINT
@@ -1000,16 +1009,19 @@ def zone_summary_table(s_lat, s_lon, p, radar_coords, front_lat, pressure_drop_h
     return pd.DataFrame(rows)
 
 
-def forecast_cone_radius_mi(hour):
-    radii = {
-        0: 10,
-        6: 18,
-        12: 28,
-        24: 45,
-        36: 65,
-        48: 85,
+def forecast_cone_radius_mi(hour, r_max):
+    base = {
+        0: 1.2,
+        6: 1.6,
+        12: 2.0,
+        24: 2.8,
+        36: 3.6,
+        48: 4.5,
     }
-    return radii.get(hour, 40)
+
+    scale = base.get(hour, 3.0)
+
+    return r_max * scale
 
 
 def build_forecast_track(l_lat, l_lon, f_speed, f_dir):
@@ -1053,10 +1065,22 @@ def build_extreme_wind_warning_polygon(
     asymmetry_factor = 1.0 + ((1.0 - symmetry) * 0.8) + (shear_mag / 120.0)
     roughness_factor = 1.0 + (urban_factor * 0.35) + ((1.0 - terrain_friction) * 0.4)
 
-    lead_miles = max(20, min(85, (r_max * 1.35 + forward_speed * 1.45) * intensity_factor * asymmetry_factor))
-    trail_miles = max(8, min(26, r_max * 0.50 * roughness_factor))
-    half_width_left = max(7, min(26, r_max * 0.52 * roughness_factor))
-    half_width_right = max(10, min(38, r_max * 0.78 * intensity_factor * asymmetry_factor))
+    # -----------------------------
+# DYNAMIC SIZE (RMW-DRIVEN)
+# -----------------------------
+base = r_max
+
+lead_miles = (base * 1.8 + forward_speed * 1.6) * intensity_factor * asymmetry_factor
+trail_miles = base * 0.6 * roughness_factor
+
+half_width_left = base * 0.7 * roughness_factor
+half_width_right = base * 1.0 * intensity_factor * asymmetry_factor
+
+# soft caps (less restrictive)
+lead_miles = np.clip(lead_miles, 25, 140)
+trail_miles = np.clip(trail_miles, 10, 45)
+half_width_left = np.clip(half_width_left, 10, 45)
+half_width_right = np.clip(half_width_right, 15, 65)
 
     front_lat, front_lon = offset_latlon(center_lat, center_lon, lead_miles, heading_deg)
     rear_lat, rear_lon = offset_latlon(center_lat, center_lon, trail_miles, heading_deg + 180)
@@ -1483,17 +1507,22 @@ with c1:
             tooltip="Extreme Wind Warning"
         ).add_to(m)
 
-    # -----------------------------
-    # CONE OF UNCERTAINTY (REAL)
-    # -----------------------------
-    if show_cone and forecast_track:
-        cone_coords = []
-        for pt in forecast_track:
-            radius_deg = pt["cone_radius_mi"] / 69.0
-            for angle in np.linspace(0, 360, 24):
-                lat = pt["lat"] + radius_deg * np.cos(np.radians(angle))
-                lon = pt["lon"] + radius_deg * np.sin(np.radians(angle))
-                cone_coords.append((lat, lon))
+# -----------------------------
+# CONE OF UNCERTAINTY (REAL)
+# -----------------------------
+if show_cone and forecast_track:
+    cone_coords = []
+
+    v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
+
+    for pt in forecast_track:
+        radius_mi = forecast_cone_radius_mi(pt["hour"], r_max)
+        radius_deg = radius_mi / 69.0
+
+        for angle in np.linspace(0, 360, 24):
+            lat = pt["lat"] + radius_deg * np.cos(np.radians(angle))
+            lon = pt["lon"] + radius_deg * np.sin(np.radians(angle))
+            cone_coords.append((lat, lon))
 
         folium.Polygon(
             locations=cone_coords,
