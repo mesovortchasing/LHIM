@@ -1572,6 +1572,7 @@ if show_cone and forecast_track:
         fill_opacity=0.08,
         tooltip="Cone of Uncertainty"
     ).add_to(m)
+
 # -----------------------------
 # CLICK / INSPECTOR STATE
 # -----------------------------
@@ -1618,26 +1619,26 @@ if show_hurricane_warning and warnings_active:
     poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
 
     if poly and len(poly) >= 3:
-    folium.Polygon(
-        locations=poly,
-        color="orange",
-        fill=True,
-        fill_opacity=extreme_opacity,
-        weight=2
-    ).add_to(m)
+        folium.Polygon(
+            locations=poly,
+            color="orange",
+            fill=True,
+            fill_opacity=extreme_opacity,
+            weight=2
+        ).add_to(m)
 
 
 if show_surge_warning and warnings_active:
     poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
 
     if poly and len(poly) >= 3:
-    folium.Polygon(
-        locations=poly,
-        color="purple",
-        fill=True,
-        fill_opacity=extreme_opacity,
-        weight=2
-    ).add_to(m)
+        folium.Polygon(
+            locations=poly,
+            color="purple",
+            fill=True,
+            fill_opacity=extreme_opacity,
+            weight=2
+        ).add_to(m)
 
 
 # -----------------------------
@@ -1694,7 +1695,7 @@ if map_data and map_data.get("last_clicked"):
         map_data["last_clicked"]["lat"],
         map_data["last_clicked"]["lng"]
     )
-    
+
     # -----------------------------
     # INSPECTOR PANEL
     # -----------------------------
@@ -1713,60 +1714,61 @@ if map_data and map_data.get("last_clicked"):
         Velocity: {vel:.1f} kt
         </div>
         """, unsafe_allow_html=True)
-        
-    if show_warning_text_panel and warning_polygon is not None:
-        st.divider()
-        st.subheader("🚨 Example Extreme Wind Warning")
 
-        tab1, tab2, tab3 = st.tabs(["Warning Text", "Local Risk", "Polygon Meta"])
+if show_warning_text_panel and warning_polygon is not None:
+    st.divider()
+    st.subheader("🚨 Example Extreme Wind Warning")
 
-        with tab1:
-            st.markdown(
-                f"""
-                <div style="
-                    background:#11131a;
-                    border:2px solid #ff4d4d;
-                    border-radius:12px;
-                    padding:14px;
-                    color:#f5f7fa;
-                    font-family:monospace;
-                    font-size:13px;
-                    white-space:pre-wrap;
-                    line-height:1.25;
-                    max-height:420px;
-                    overflow-y:auto;
-                    box-shadow:0 0 14px rgba(255,77,77,0.18);
-                ">{example_warning_text}</div>
-                """,
-                unsafe_allow_html=True,
-            )
+    tab1, tab2, tab3 = st.tabs(["Warning Text", "Local Risk", "Polygon Meta"])
 
-        with tab2:
-            risk_rows = []
-            for place in warning_places:
-                if place in PLACE_CONTEXT:
-                    risk_rows.append({
-                        "Place": place,
-                        "Terrain": PLACE_CONTEXT[place]["terrain"],
-                        "Risk": PLACE_CONTEXT[place]["risk_notes"],
-                    })
-            if risk_rows:
-                st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
-            else:
-                st.info("No localized risk notes available for this scenario.")
+    with tab1:
+        st.markdown(
+            f"""
+            <div style="
+                background:#11131a;
+                border:2px solid #ff4d4d;
+                border-radius:12px;
+                padding:14px;
+                color:#f5f7fa;
+                font-family:monospace;
+                font-size:13px;
+                white-space:pre-wrap;
+                line-height:1.25;
+                max-height:420px;
+                overflow-y:auto;
+                box-shadow:0 0 14px rgba(255,77,77,0.18);
+            ">{example_warning_text}</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        with tab3:
-            st.dataframe(pd.DataFrame([{
-                "Landfall Zone": landfall_zone_name,
-                "Storm Heading": deg_to_compass(f_dir),
-                "Forward Speed": f"{f_speed:.0f} kt / {kt_to_mph(f_speed):.0f} mph",
-                "Intensity": f"{v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph",
-                "RMW": f"{r_max:.0f} mi",
-                "Symmetry": f"{symmetry:.2f}",
-                "Shear": f"{shear_mag:.0f} kt",
-                "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
-                "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
-            }]), hide_index=True, use_container_width=True)
+    with tab2:
+        risk_rows = []
+        for place in warning_places:
+            if place in PLACE_CONTEXT:
+                risk_rows.append({
+                    "Place": place,
+                    "Terrain": PLACE_CONTEXT[place]["terrain"],
+                    "Risk": PLACE_CONTEXT[place]["risk_notes"],
+                })
+        if risk_rows:
+            st.dataframe(pd.DataFrame(risk_rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No localized risk notes available for this scenario.")
+
+    with tab3:
+        st.dataframe(pd.DataFrame([{
+            "Landfall Zone": landfall_zone_name,
+            "Storm Heading": deg_to_compass(f_dir),
+            "Forward Speed": f"{f_speed:.0f} kt / {kt_to_mph(f_speed):.0f} mph",
+            "Intensity": f"{v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph",
+            "RMW": f"{r_max:.0f} mi",
+            "Symmetry": f"{symmetry:.2f}",
+            "Shear": f"{shear_mag:.0f} kt",
+            "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
+            "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
+        }]), hide_index=True, use_container_width=True)
+
 # -----------------------------
 # CLICK LOCATION (RESTORE)
 # -----------------------------
@@ -1778,8 +1780,7 @@ if map_data and map_data.get("last_clicked"):
     click_lon = map_data["last_clicked"]["lng"]
 else:
     click_lat, click_lon = current_lat, current_lon
-
-
+    
 # -----------------------------
 # ENVIRONMENT (CRITICAL FIX)
 # -----------------------------
