@@ -224,24 +224,40 @@ def get_synthetic_products(
 
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
 
-is_major = v_max >= 96
-shear_rad = np.radians(shear_dir)
-shear_offset_x = (shear_mag / 20) * np.cos(shear_rad)
-shear_offset_y = (shear_mag / 20) * np.sin(shear_rad)
-r_adj = np.sqrt(((lon - s_lon - shear_offset_x / 53) * 53) ** 2 + ((lat - s_lat - shear_offset_y / 69) * 69) ** 2)
+    is_major = v_max >= 96
 
-eyewall = 65 * np.exp(-((r - r_max) ** 2) / (r_max * 0.3) ** 2)
-moisture_flux = (rh / 100) * (1 + (shear_mag / 100))
-shield = 42 * moisture_flux * np.exp(-r_adj / (r_max * 5.0))
-bands = max(0, np.sin(r / (r_max * 0.8) - angle * 3.0) * 35 * np.exp(-r / 200))
-front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > front_lat - 0.5) else 0
+    shear_rad = np.radians(shear_dir)
+    shear_offset_x = (shear_mag / 20) * np.cos(shear_rad)
+    shear_offset_y = (shear_mag / 20) * np.sin(shear_rad)
+
+    r_adj = np.sqrt(
+        ((lon - s_lon - shear_offset_x / 53) * 53) ** 2 +
+        ((lat - s_lat - shear_offset_y / 69) * 69) ** 2
+    )
+
+    eyewall = 65 * np.exp(-((r - r_max) ** 2) / (r_max * 0.3) ** 2)
+
+    moisture_flux = (rh / 100) * (1 + (shear_mag / 100))
+    shield = 42 * moisture_flux * np.exp(-r_adj / (r_max * 5.0))
+
+    bands = max(
+        0,
+        np.sin(r / (r_max * 0.8) - angle * 3.0) * 35 * np.exp(-r / 200)
+    )
+
+    front_rain = (
+        30 * np.exp(-abs(lat - front_lat) * 2)
+        if (front_lat and lat > front_lat - 0.5)
+        else 0
+    )
 
     # Eyewall replacement cycle structure.
     if ewr_phase > 0:
-        outer_ring = 0.72 * 65 * np.exp(-((r - (r_max * 1.8)) ** 2) / (r_max * 0.58) ** 2)
+        outer_ring = 0.72 * 65 * np.exp(
+            -((r - (r_max * 1.8)) ** 2) / (r_max * 0.58) ** 2
+        )
         eyewall = eyewall * (1 - min(1.0, ewr_phase))
         bands = max(bands, outer_ring)
-
     dbz = max(eyewall, shield, bands, front_rain) * symmetry
 
     if r < r_max * (0.15 if v_max >= 96 else 0.4):
