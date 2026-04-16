@@ -31,6 +31,32 @@ from geopy.geocoders import Nominatim
 # This app supports it if you provide a tile URL in the sidebar.
 # =========================================================
 
+# -----------------------------
+# INSPECTOR DEFAULTS (CRITICAL FIX)
+# -----------------------------
+season_month = "September"
+sst_boost = True
+front_lat = 31.8
+shear_mag = 15
+shear_dir = 240
+rh = 88
+outflow = 0.8
+symmetry = 0.85
+pressure_drop_hpa = 32
+dry_air = 8
+urban_heat = 1.2
+ewr_phase = 0.0
+
+extreme_wind_threshold_mph = 115
+show_warnings = True
+show_extreme_wind_warning = True
+show_warning_text_panel = True
+surge_threshold = 6
+show_zone_boxes = True
+show_city_markers = True
+show_forecast_track = True
+show_cone = True
+
 #Inspired Inspector Tool 
 if "inspector_mode" not in st.session_state:
     st.session_state.inspector_mode = False
