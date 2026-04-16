@@ -792,7 +792,7 @@ def get_zone_meta(lat, lon):
     return zone_name, ZONES[zone_name]
 
 
-ddef compute_local_environment(
+def compute_local_environment(
     lat, lon, s_lat, s_lon, p, radar_coords, front_lat,
     pressure_drop_hpa=32, dry_air=0, urban_heat=0, ewr_phase=0.0
 ):
