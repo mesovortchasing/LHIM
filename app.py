@@ -1429,24 +1429,23 @@ c1, c2 = st.columns([4, 1])
 
 with c1:
     m = folium.Map(
-    location=[30.5, -88.5],  # center on Mobile area
-    zoom_start=7,
-    min_zoom=6,
-    max_zoom=10,
-    max_bounds=True,
-)
+        location=[30.5, -88.5],  # center on Mobile area
+        zoom_start=7,
+        min_zoom=6,
+        max_zoom=10,
+        max_bounds=True,
+    )
 
-bounds = [
-    [28.0, -91.5],  # Southwest (off Louisiana coast)
-    [32.5, -84.5],  # Northeast (AL / FL inland)
-]
+    bounds = [
+        [28.0, -91.5],  # Southwest (off Louisiana coast)
+        [32.5, -84.5],  # Northeast (AL / FL inland)
+    ]
 
-m.fit_bounds(bounds)
-m.options["maxBounds"] = bounds
-m.options["maxBoundsViscosity"] = 1.0
-    
-folium.TileLayer("CartoDB dark_matter").add_to(m)
+    m.fit_bounds(bounds)
+    m.options["maxBounds"] = bounds
+    m.options["maxBoundsViscosity"] = 1.0
 
+    folium.TileLayer("CartoDB dark_matter").add_to(m)
 
     # -----------------------------
     # RADAR GRID
