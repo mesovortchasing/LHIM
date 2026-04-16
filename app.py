@@ -267,7 +267,7 @@ front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > fron
 
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
 
-    return min(78, dbz), aliased_v, surge, prob, beam_height_km
+    return min(78, dbz), aliased_v, surge, prob, beam_height_km 
 # -----------------------------
 # 2. MOBILE COUNTY ZONES & CITIES
 # -----------------------------
