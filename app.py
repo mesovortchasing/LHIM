@@ -1576,27 +1576,30 @@ if show_cone and forecast_track:
             tooltip="Cone of Uncertainty"
         ).add_to(m)
 
-    # -----------------------------
-    # CLICK / INSPECTOR STATE
-    # -----------------------------
-    if "last_click" not in st.session_state:
-        st.session_state.last_click = (current_lat, current_lon)
+# -----------------------------
+# CLICK / INSPECTOR STATE
+# -----------------------------
+if "last_click" not in st.session_state:
+    st.session_state.last_click = (current_lat, current_lon)
 
-    inspect_lat, inspect_lon = st.session_state.last_click
+inspect_lat, inspect_lon = st.session_state.last_click
 
-    if st.session_state.inspector_mode:
-        folium.Marker(
-            [inspect_lat, inspect_lon],
-            icon=folium.Icon(color="white", icon="plus"),
-        ).add_to(m)
+if st.session_state.inspector_mode:
+    folium.Marker(
+        [inspect_lat, inspect_lon],
+        icon=folium.Icon(color="white", icon="plus"),
+    ).add_to(m)
+
 
 def distance_miles(lat1, lon1, lat2, lon2):
     return np.hypot((lat1 - lat2) * 69, (lon1 - lon2) * 53)
 
+
 dist_to_landfall = distance_miles(current_lat, current_lon, l_lat, l_lon)
 
 warnings_active = dist_to_landfall <= warning_distance_trigger
-    
+
+
 if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_threshold_mph:
     poly = build_extreme_wind_warning_polygon(
         current_lat, current_lon, f_dir, f_speed,
@@ -1612,7 +1615,8 @@ if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_th
         weight=2
     ).add_to(m)
 
-    if show_hurricane_warning and warnings_active:
+
+if show_hurricane_warning and warnings_active:
     poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
 
     folium.Polygon(
@@ -1623,7 +1627,8 @@ if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_th
         weight=2
     ).add_to(m)
 
-    if show_surge_warning and warnings_active:
+
+if show_surge_warning and warnings_active:
     poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
 
     folium.Polygon(
@@ -1633,18 +1638,21 @@ if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_th
         fill_opacity=surge_opacity,
         weight=2
     ).add_to(m)
-    
+
+
 # -----------------------------
-    # RENDER MAP (STABLE KEY)
-    # -----------------------------
-    map_data = st_folium(
+# RENDER MAP (STABLE KEY)
+# -----------------------------
+map_data = st_folium(
     m,
     height=850,
     use_container_width=True,  # 👈 THIS fixes width
     key="main_map",
     returned_objects=["last_clicked"]
 )
-    with c2:
+
+
+with c2:
     st.subheader("⚠️ Warning Panel")
 
     if show_warning_text_panel and warnings_active:
