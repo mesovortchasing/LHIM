@@ -819,8 +819,30 @@ def compute_local_environment(
     friction_recovery = 1 + ((1 - zone_meta["terrain_friction"]) * 0.15)
     w_kts = w_kts * coastal_boost * friction_recovery
 
-    gust_factor = 1.18 + (0.0018 * w_kts) + (zone_meta["urban_factor"] * 0.08)
-    gust = w_kts * gust_factor
+    # -----------------------------
+# REALISTIC GUST LOGIC
+# -----------------------------
+
+# Base gust factor (lower inland)
+if radius_mi < r_max:
+    gust_factor = 1.25   # eyewall
+else:
+    gust_factor = 1.15   # outer bands
+
+# Terrain friction (kills inland winds)
+friction = 0.85 - (radius_mi / 300)  # increases decay with distance
+friction = max(0.6, min(friction, 0.9))
+
+# Apply
+gust_kts = wind_kts * gust_factor * friction
+
+# HARD CAPS (this is key)
+if radius_mi > 20:  # inland
+    gust_kts = min(gust_kts, 130)   # ~150 mph max inland
+else:  # near core
+    gust_kts = min(gust_kts, 155)   # extreme but realistic
+
+gust_mph = gust_kts * 1.15078
 
     t_base = 84 if sst_mult >= 1.15 else 81
     temp_f = (
