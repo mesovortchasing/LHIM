@@ -1022,7 +1022,7 @@ def forecast_cone_radius_mi(hour, r_max):
     return r_max * scale
 
 
-def build_forecast_track(l_lat, l_lon, f_speed, f_dir):
+def build_forecast_track(l_lat, l_lon, f_speed, f_dir, r_max):
     points = []
     for hour in [0, 6, 12, 24, 36, 48]:
         dist_moved = (f_speed * hour) / 69.0
@@ -1032,7 +1032,7 @@ def build_forecast_track(l_lat, l_lon, f_speed, f_dir):
             "hour": hour,
             "lat": f_lat,
             "lon": f_lon,
-            "cone_radius_mi": forecast_cone_radius_mi(hour),
+            "cone_radius_mi": forecast_cone_radius_mi(hour, r_max),
         })
     return points
 
@@ -1373,7 +1373,7 @@ with col_top_right:
 mslp = calculate_mslp(v_max, pressure_drop_hpa)
 pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
 storm_class = saffir_simpson_category(v_max)
-forecast_track = build_forecast_track(l_lat, l_lon, f_speed, f_dir)
+forecast_track = build_forecast_track(l_lat, l_lon, f_speed, f_dir, r_max)
 
 landfall_env = compute_local_environment(
     l_lat, l_lon, current_lat, current_lon, p, radar_coords, front_lat,
