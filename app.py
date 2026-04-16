@@ -1299,78 +1299,187 @@ p = [
 radar_coords = RADAR_SITES[st.session_state.active_radar]
 
 # -----------------------------
-# MAIN LAYOUT (MAP GOES HERE)
+# MAIN LAYOUT (MAP AT TOP)
 # -----------------------------
-col1, col2 = st.columns([0.9, 0.1])
+col_top_left, col_top_right = st.columns([0.92, 0.08])
 
-
-    # -----------------------------
-    # RENDER MAP + GET CLICK DATA
-    # -----------------------------
-    map_data = st_folium(
-        m,
-        width="100%",
-        height=700,
-        returned_objects=["last_clicked"],
-        key=f"map_{st.session_state.loop_idx}"
-    )
-
-    # -----------------------------
-    # INSPECTOR POSITION (ALWAYS DEFINED → FIXES YOUR CRASH)
-    # -----------------------------
-    if map_data and map_data.get("last_clicked"):
-        inspect_lat = map_data["last_clicked"]["lat"]
-        inspect_lon = map_data["last_clicked"]["lng"]
-    else:
-        inspect_lat, inspect_lon = current_lat, current_lon
-
-
-with col2:
+with col_top_right:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
 
 
 # -----------------------------
-# INSPECTOR VISUAL + DATA
+# 7. MAP & DASHBOARD
 # -----------------------------
-if st.session_state.inspector_mode:
+c1, c2 = st.columns([4, 1.8])
 
-    # Marker on map location
-    folium.Marker(
-        [inspect_lat, inspect_lon],
-        icon=folium.Icon(color="white", icon="plus"),
-        tooltip="Inspector Point"
+with c1:
+
+    # -----------------------------
+    # BUILD MAP
+    # -----------------------------
+    if basemap_mode == "Dark":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=True).add_to(m)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=False,
+            ).add_to(m)
+
+    elif basemap_mode == "Street":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=True).add_to(m)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=False,
+            ).add_to(m)
+
+    else:
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                attr="Esri World Imagery",
+                name="Satellite",
+                control=True,
+                show=True,
+            ).add_to(m)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+
+    if enable_traffic and traffic_tile_url.strip():
+        folium.TileLayer(
+            tiles=traffic_tile_url.strip(),
+            attr="Traffic Provider",
+            name="Traffic",
+            overlay=True,
+            control=True,
+            opacity=0.75,
+        ).add_to(m)
+
+    # -----------------------------
+    # RADAR GRID
+    # -----------------------------
+    lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
+    lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
+    d_lat, d_lon = lats[1] - lats[0], lons[1] - lons[0]
+
+    for lt in lats:
+        for ln in lons:
+            zone_name, zone_meta = get_zone_meta(lt, ln)
+            dbz, vel, surge, prob, beam_height_km = get_synthetic_products(
+                lt, ln, current_lat, current_lon, p,
+                radar_coords=radar_coords,
+                front_lat=front_lat,
+                terrain_friction=zone_meta["terrain_friction"],
+                coastal_exposure=zone_meta["coastal_exposure"],
+                ewr_phase=ewr_phase,
+            )
+
+            if radar_view == "Reflectivity (dBZ)":
+                color = nws_reflectivity_color(dbz)
+            elif radar_view == "Velocity (kts)":
+                color = velocity_color_hyperrealistic(vel)
+            elif radar_view == "Storm Surge":
+                color = surge_color(surge)
+            else:
+                color = wind_prob_color(prob)
+
+            if color:
+                folium.Rectangle(
+                    bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
+                    color=color,
+                    fill=True,
+                    fill_opacity=0.55,
+                    weight=0,
+                ).add_to(m)
+
+    # -----------------------------
+    # DEFAULT INSPECTOR POSITION
+    # -----------------------------
+    inspect_lat, inspect_lon = current_lat, current_lon
+
+    if "last_click" in st.session_state:
+        inspect_lat, inspect_lon = st.session_state.last_click
+
+    # -----------------------------
+    # DRAW INSPECTOR MARKER
+    # -----------------------------
+    if st.session_state.inspector_mode:
+        folium.Marker(
+            [inspect_lat, inspect_lon],
+            icon=folium.Icon(color="white", icon="plus"),
+            tooltip="Inspector Point"
+        ).add_to(m)
+
+    # -----------------------------
+    # RENDER MAP (ONLY ONCE)
+    # -----------------------------
+    map_data = st_folium(
+        m,
+        width="100%",
+        height=750,
+        key=f"map_{st.session_state.loop_idx}",
+        returned_objects=["last_clicked"],
     )
 
-    dbz, vel, surge, prob, beam = get_synthetic_products(
-        inspect_lat,
-        inspect_lon,
-        current_lat,
-        current_lon,
-        p,
-        radar_coords=radar_coords
-    )
+    # -----------------------------
+    # UPDATE CLICK LOCATION
+    # -----------------------------
+    if map_data and map_data.get("last_clicked"):
+        inspect_lat = map_data["last_clicked"]["lat"]
+        inspect_lon = map_data["last_clicked"]["lng"]
+        st.session_state.last_click = (inspect_lat, inspect_lon)
 
-    vel_mph = vel * 1.15078
+    # -----------------------------
+    # INSPECTOR PANEL
+    # -----------------------------
+    if st.session_state.inspector_mode:
+        dbz, vel, surge, prob, beam = get_synthetic_products(
+            inspect_lat,
+            inspect_lon,
+            current_lat,
+            current_lon,
+            p,
+            radar_coords=radar_coords
+        )
 
-    st.markdown(f"""
-    <div style="
-        position: fixed;
-        top: 70px;
-        right: 20px;
-        background: rgba(0,0,0,0.6);
-        padding: 10px 14px;
-        border-radius: 8px;
-        color: white;
-        font-size: 14px;
-        z-index: 9999;
-    ">
-        <b>Inspector</b><br>
-        Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
-        Reflectivity: {dbz:.1f} dBZ<br>
-        Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
-    </div>
-    """, unsafe_allow_html=True)
+        vel_mph = vel * 1.15078
+
+        st.markdown(f"""
+        <div style="
+            position: fixed;
+            top: 70px;
+            right: 20px;
+            background: rgba(0,0,0,0.6);
+            padding: 10px 14px;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            z-index: 9999;
+        ">
+            <b>Inspector</b><br>
+            Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
+            Reflectivity: {dbz:.1f} dBZ<br>
+            Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
+        </div>
+        """, unsafe_allow_html=True)
 
 mslp = calculate_mslp(v_max, pressure_drop_hpa)
 pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
