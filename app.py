@@ -1276,6 +1276,27 @@ with st.sidebar:
     selected_city = st.selectbox("City / Place", list(CITY_POINTS.keys()), index=list(CITY_POINTS.keys()).index("Mobile"))
     use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
 
+# -----------------------------
+# STORM CALCULATIONS
+# -----------------------------
+dist_moved = (f_speed * current_time_offset) / 69.0
+current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
+current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
+
+p = [
+    v_max,
+    r_max,
+    f_speed,
+    f_dir,
+    shear_mag,
+    shear_dir,
+    rh,
+    outflow,
+    symmetry,
+    get_sst_mult(season_month, sst_boost),
+]
+
+radar_coords = RADAR_SITES[st.session_state.active_radar]
 
 # -----------------------------
 # MAIN LAYOUT (MAP GOES HERE)
@@ -1377,28 +1398,6 @@ if st.session_state.inspector_mode:
         Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
     </div>
     """, unsafe_allow_html=True)
-
-# -----------------------------
-# STORM CALCULATIONS
-# -----------------------------
-dist_moved = (f_speed * current_time_offset) / 69.0
-current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
-current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
-
-p = [
-    v_max,
-    r_max,
-    f_speed,
-    f_dir,
-    shear_mag,
-    shear_dir,
-    rh,
-    outflow,
-    symmetry,
-    get_sst_mult(season_month, sst_boost),
-]
-
-radar_coords = RADAR_SITES[st.session_state.active_radar]
 
 mslp = calculate_mslp(v_max, pressure_drop_hpa)
 pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
