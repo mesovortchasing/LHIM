@@ -160,7 +160,7 @@ def calculate_full_physics(
     wind_angle_rad = angle + (np.pi / 2) + np.radians(inflow if r > r_max else inflow / 2)
     v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
 
-    surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
+surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
 
 # --- NEW: boost wind using pressure gradient approximation ---
 gradient_boost = (v_max / max(r_max, 1)) * 0.08
