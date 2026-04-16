@@ -193,6 +193,9 @@ def get_synthetic_products(
 ):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
     w, wd, r = calculate_full_physics(
+    arg1,
+    arg2,
+)
 
         # --- NEW: approximate central pressure safely ---
     base_mslp = calculate_mslp(v_max, 0)
