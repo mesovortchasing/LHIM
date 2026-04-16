@@ -212,7 +212,7 @@ gx = (p_neighbors[2] - p_neighbors[3]) * 0.5
 gy = (p_neighbors[0] - p_neighbors[1]) * 0.5
 
 u, v = compute_wind_vector(gx, gy)
-    angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
+angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
 
     is_major = v_max >= 96
     shear_rad = np.radians(shear_dir)
