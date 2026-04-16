@@ -1622,6 +1622,21 @@ with c1:
         force_separate_button=True,
     ).add_to(m)
     
+# default before click exists
+inspect_lat, inspect_lon = current_lat, current_lon
+
+# if we already have a stored click
+if "last_click" in st.session_state:
+    inspect_lat, inspect_lon = st.session_state.last_click
+
+# add marker BEFORE rendering map
+if st.session_state.inspector_mode:
+    folium.Marker(
+        [inspect_lat, inspect_lon],
+        icon=folium.Icon(color="white", icon="plus"),
+        tooltip="Inspector Point"
+    ).add_to(m)    
+    
     map_data = st_folium(
         m,
         width="100%",
@@ -1630,18 +1645,18 @@ with c1:
         returned_objects=["last_clicked"],
     )
 
-if map_data and map_data.get("last_clicked") and st.session_state.inspector_mode:
-    folium.Marker(
-        [inspect_lat, inspect_lon],
-        icon=folium.Icon(color="white", icon="plus"),
-        tooltip="Inspector Point"
-    ).add_to(m)
-
 if map_data and map_data.get("last_clicked"):
     inspect_lat = map_data["last_clicked"]["lat"]
     inspect_lon = map_data["last_clicked"]["lng"]
 else:
     inspect_lat, inspect_lon = current_lat, current_lon
+
+if st.session_state.inspector_mode:
+    folium.Marker(
+        [inspect_lat, inspect_lon],
+        icon=folium.Icon(color="white", icon="plus"),
+        tooltip="Inspector Point"
+    ).add_to(m)
     
 if st.session_state.inspector_mode:
 
