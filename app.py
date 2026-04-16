@@ -1173,6 +1173,17 @@ geolocator = Nominatim(user_agent="lhim_mobile_county_v40_hyperrealistic")
 # -----------------------------
 st.set_page_config(layout="wide", page_title="LHIM Mobile County v4.0 | Hyperrealistic Mode")
 
+# --- SESSION STATE SAFETY ---
+if "inspector_mode" not in st.session_state:
+    st.session_state.inspector_mode = False
+if "active_radar" not in st.session_state:
+    st.session_state.active_radar = list(RADAR_SITES.keys())[0]
+if "is_playing" not in st.session_state:
+    st.session_state.is_playing = False
+if "loop_idx" not in st.session_state:
+    st.session_state.loop_idx = 0
+
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🛡️ LHIM Mobile County v4.0")
     radar_view = st.radio(
@@ -1180,33 +1191,38 @@ with st.sidebar:
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
 
+# --- MAIN LAYOUT ---
 col1, col2 = st.columns([0.9, 0.1])
 
-    st.subheader("📡 Radar Controls")
-    st.session_state.active_radar = st.selectbox(
-        "Radar Site",
-        list(RADAR_SITES.keys()),
-        index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
-    )
-    run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
-    st.session_state.is_playing = run_loop
-    current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
-    st.session_state.loop_idx = current_time_offset
+# ✅ CORE CONTROLS (ALWAYS DEFINED)
+st.subheader("📡 Radar Controls")
+st.session_state.active_radar = st.selectbox(
+    "Radar Site",
+    list(RADAR_SITES.keys()),
+    index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
+)
+
+run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
+st.session_state.is_playing = run_loop
+
+current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
+st.session_state.loop_idx = current_time_offset
 
 
-    st.subheader("🌀 Storm Structure")
-    v_max = st.slider("Intensity (kts)", 40, 160, 115)
-    r_max = st.slider("RMW (miles)", 10, 60, 25)
-    f_speed = st.slider("Forward Speed", 2, 40, 12)
-    f_dir = st.slider("Heading", 0, 360, 330)
-    l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
-    l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
-    res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
+st.subheader("🌀 Storm Structure")
+v_max = st.slider("Intensity (kts)", 40, 160, 115)
+r_max = st.slider("RMW (miles)", 10, 60, 25)
+f_speed = st.slider("Forward Speed", 2, 40, 12)
+f_dir = st.slider("Heading", 0, 360, 330)
+l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
+l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
+res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
+# --- BUTTON COLUMN ---
 with col2:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
-    
+
     with st.expander("🗺️ Base Map Controls", expanded=True):
         basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
         enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
@@ -1216,10 +1232,10 @@ with col2:
         traffic_tile_url = st.text_input(
             "Traffic Tile URL (optional / provider required)",
             value="",
-            help="Paste a valid traffic tile endpoint if you have one. True live traffic usually requires a provider/API key."
+            help="Paste a valid traffic tile endpoint if you have one."
         )
 
-# 👇 OUTSIDE col2 (important)
+# --- INSPECTOR MODE UI ---
 if st.session_state.inspector_mode:
     st.markdown("""
     <div style="
@@ -1266,10 +1282,7 @@ if st.session_state.inspector_mode:
     selected_city = st.selectbox("City / Place", list(CITY_POINTS.keys()), index=list(CITY_POINTS.keys()).index("Mobile"))
     use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
 
-
-# current storm position
-# retained from original logic
-
+# --- CORE CALCULATIONS ---
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
 current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
