@@ -1608,22 +1608,22 @@ st.subheader("⚠️ Warning Panel")
 
 if show_warning_text_panel and warnings_active:
     if poly and len(poly) >= 5:
-    selected_places = pick_impacted_places(poly, CITY_POINTS)
+        selected_places = pick_impacted_places(poly, CITY_POINTS)
 
-    warning_text = generate_extreme_wind_warning_text(
-        poly,
-        l_lat, l_lon,
-        current_lat, current_lon,
-        f_dir, f_speed,
-        v_max,
-        kt_to_mph(v_max),
-        kt_to_mph(v_max) * 1.2,
-        selected_places
-    )
+        warning_text = generate_extreme_wind_warning_text(
+            poly,
+            l_lat, l_lon,
+            current_lat, current_lon,
+            f_dir, f_speed,
+            v_max,
+            kt_to_mph(v_max),
+            kt_to_mph(v_max) * 1.2,
+            selected_places
+        )
 
-    st.text_area("Warning Text", warning_text, height=400)
-else:
-    st.warning("Polygon not large enough to generate warning text.")
+        st.text_area("Warning Text", warning_text, height=400)
+    else:
+        st.warning("Polygon not large enough to generate warning text.")
 
 # -----------------------------
 # CLICK UPDATE
@@ -1633,7 +1633,7 @@ if map_data and map_data.get("last_clicked"):
         map_data["last_clicked"]["lat"],
         map_data["last_clicked"]["lng"]
     )
-
+    
     # -----------------------------
     # INSPECTOR PANEL
     # -----------------------------
