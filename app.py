@@ -1594,13 +1594,14 @@ if st.session_state.inspector_mode:
 def distance_miles(lat1, lon1, lat2, lon2):
     return np.hypot((lat1 - lat2) * 69, (lon1 - lon2) * 53)
 
+wind_mph = kt_to_mph(v_max)
+gust_mph = wind_mph * 1.2
 
 dist_to_landfall = distance_miles(current_lat, current_lon, l_lat, l_lon)
-
 warnings_active = dist_to_landfall <= warning_distance_trigger
 
 
-if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_threshold_mph:
+if show_extreme_wind_warning and warnings_active and kt_to_mph(v_max) >= extreme_wind_threshold_mph:
     poly = build_extreme_wind_warning_polygon(
         current_lat, current_lon, f_dir, f_speed,
         r_max, v_max, symmetry, shear_mag,
