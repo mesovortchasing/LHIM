@@ -1538,13 +1538,13 @@ folium.Marker(
 # EXTREME WIND WARNING POLYGON
 # -----------------------------
 if show_extreme_wind_warning and warning_polygon is not None and len(warning_polygon) > 2:
+    if poly and len(poly) >= 3:
     folium.Polygon(
-        locations=warning_polygon,
+        locations=poly,
         color="red",
-        weight=3,
         fill=True,
-        fill_opacity=0.25,
-        tooltip="Extreme Wind Warning"
+        fill_opacity=extreme_opacity,
+        weight=2
     ).add_to(m)
 
 # -----------------------------
@@ -1618,11 +1618,12 @@ if show_extreme_wind_warning and warnings_active and kt_to_mph(v_max) >= extreme
 if show_hurricane_warning and warnings_active:
     poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
 
+    if poly and len(poly) >= 3:
     folium.Polygon(
         locations=poly,
         color="orange",
         fill=True,
-        fill_opacity=hurricane_opacity,
+        fill_opacity=extreme_opacity,
         weight=2
     ).add_to(m)
 
@@ -1630,11 +1631,12 @@ if show_hurricane_warning and warnings_active:
 if show_surge_warning and warnings_active:
     poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
 
+    if poly and len(poly) >= 3:
     folium.Polygon(
         locations=poly,
         color="purple",
         fill=True,
-        fill_opacity=surge_opacity,
+        fill_opacity=extreme_opacity,
         weight=2
     ).add_to(m)
 
