@@ -91,6 +91,38 @@ def saffir_simpson_category(v_max_kts):
         return "Category 4"
     return "Category 5"
 
+# -----------------------------
+# NEW: PRESSURE GRADIENT + VECTOR WIND ENGINE
+# -----------------------------
+
+def compute_pressure_gradient(p_center, p_neighbors, distances):
+    gradients = []
+    for p, d in zip(p_neighbors, distances):
+        if d == 0:
+            continue
+        gradients.append((p_center - p) / d)
+    return sum(gradients) / len(gradients) if gradients else 0
+
+
+def compute_directional_gradient(p_grid, i, j):
+    rows, cols = p_grid.shape
+
+    left  = p_grid[i][j-1] if j-1 >= 0 else p_grid[i][j]
+    right = p_grid[i][j+1] if j+1 < cols else p_grid[i][j]
+    up    = p_grid[i-1][j] if i-1 >= 0 else p_grid[i][j]
+    down  = p_grid[i+1][j] if i+1 < rows else p_grid[i][j]
+
+    gradient_x = (right - left) * 0.5
+    gradient_y = (down - up) * 0.5
+
+    return gradient_x, gradient_y
+
+
+def compute_wind_vector(gradient_x, gradient_y, coriolis=0.22):
+    # Simple geostrophic-like balance (fast + stable)
+    u = -gradient_y * coriolis
+    v = gradient_x * coriolis
+    return u, v
 
 def calculate_full_physics(
     lat, lon, s_lat, s_lon, p,
@@ -130,6 +162,10 @@ def calculate_full_physics(
 
     surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
 
+# --- NEW: boost wind using pressure gradient approximation ---
+gradient_boost = (v_max / max(r_max, 1)) * 0.08
+surface_wind *= (1.0 + gradient_boost)
+
     # Inland decay / land interaction refinement.
     if inland_decay:
         if lat > 30.15:
@@ -157,6 +193,23 @@ def get_synthetic_products(
 ):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
     w, wd, r = calculate_full_physics(
+        # --- NEW: approximate pressure grid locally (cheap) ---
+p_center = calculate_mslp(v_max, (1012 - calculate_mslp(v_max, 0)))
+
+p_neighbors = [
+    p_center * (1 + np.random.uniform(-0.01, 0.01)),
+    p_center * (1 + np.random.uniform(-0.01, 0.01)),
+    p_center * (1 + np.random.uniform(-0.01, 0.01)),
+    p_center * (1 + np.random.uniform(-0.01, 0.01)),
+]
+
+distances = [1, 1, 1, 1]
+
+gradient = compute_pressure_gradient(p_center, p_neighbors, distances)
+gx = (p_neighbors[2] - p_neighbors[3]) * 0.5
+gy = (p_neighbors[0] - p_neighbors[1]) * 0.5
+
+u, v = compute_wind_vector(gx, gy)
         lat, lon, s_lat, s_lon, p,
         micro_scale=micro_scale,
         front_lat=front_lat,
