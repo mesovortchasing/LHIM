@@ -1545,15 +1545,16 @@ if show_cone and forecast_track:
             icon=folium.Icon(color="white", icon="plus"),
         ).add_to(m)
 
-    # -----------------------------
+# -----------------------------
     # RENDER MAP (STABLE KEY)
     # -----------------------------
     map_data = st_folium(
-        m,
-        height=850,
-        key="main_map",
-        returned_objects=["last_clicked"]
-    )
+    m,
+    height=850,
+    use_container_width=True,  # 👈 THIS fixes width
+    key="main_map",
+    returned_objects=["last_clicked"]
+)
 
     if map_data and map_data.get("last_clicked"):
         st.session_state.last_click = (
