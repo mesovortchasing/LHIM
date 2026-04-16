@@ -1198,6 +1198,7 @@ with col2:
             help="Paste a valid traffic tile endpoint if you have one. True live traffic usually requires a provider/API key."
         )
 
+# 👇 OUTSIDE col2 (important)
 if st.session_state.inspector_mode:
     st.markdown("""
     <div style="
@@ -1213,7 +1214,7 @@ if st.session_state.inspector_mode:
         ✚
     </div>
     """, unsafe_allow_html=True)
-    
+
     with st.expander("⚠️ Warning Settings", expanded=False):
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
@@ -1271,6 +1272,7 @@ if st.session_state.inspector_mode:
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
 current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
+
 p = [
     v_max,
     r_max,
@@ -1334,7 +1336,6 @@ if (
         landfall_env["gust_mph"],
         warning_places,
     )
-
 # -----------------------------
 # 7. MAP & DASHBOARD
 # -----------------------------
