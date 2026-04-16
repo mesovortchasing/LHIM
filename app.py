@@ -1317,58 +1317,6 @@ with c1:
     # -----------------------------
     # MAP BUILD (ORIGINAL FULL VERSION)
     # -----------------------------
-    if basemap_mode == "Dark":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=True).add_to(m)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                control=True,
-                show=False,
-            ).add_to(m)
-    elif basemap_mode == "Street":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=True).add_to(m)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                control=True,
-                show=False,
-            ).add_to(m)
-    else:
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                control=True,
-                show=True,
-            ).add_to(m)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
-
-    if enable_traffic and traffic_tile_url.strip():
-        folium.TileLayer(
-            tiles=traffic_tile_url.strip(),
-            attr="Traffic Provider",
-            name="Traffic",
-            overlay=True,
-            control=True,
-            opacity=0.75,
-        ).add_to(m)
 
     # -----------------------------
     # RADAR GRID (UNCHANGED)
