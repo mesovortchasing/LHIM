@@ -1630,17 +1630,24 @@ with c1:
         returned_objects=["last_clicked"],
     )
 
-if map_data and "center" in map_data:
-    center_lat = map_data["center"]["lat"]
-    center_lon = map_data["center"]["lng"]
-else:
-    center_lat, center_lon = current_lat, current_lon
+if map_data and map_data.get("last_clicked") and st.session_state.inspector_mode:
+    folium.Marker(
+        [inspect_lat, inspect_lon],
+        icon=folium.Icon(color="white", icon="plus"),
+        tooltip="Inspector Point"
+    ).add_to(m)
 
+if map_data and map_data.get("last_clicked"):
+    inspect_lat = map_data["last_clicked"]["lat"]
+    inspect_lon = map_data["last_clicked"]["lng"]
+else:
+    inspect_lat, inspect_lon = current_lat, current_lon
+    
 if st.session_state.inspector_mode:
 
     dbz, vel, surge, prob, beam = get_synthetic_products(
-        center_lat,
-        center_lon,
+        inspect_lat,
+        inspect_lon,
         current_lat,
         current_lon,
         p,
@@ -1662,11 +1669,12 @@ if st.session_state.inspector_mode:
         z-index: 9999;
     ">
         <b>Inspector</b><br>
+        Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
         Reflectivity: {dbz:.1f} dBZ<br>
         Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
     </div>
     """, unsafe_allow_html=True)
-
+    
 with c2:
     st.markdown(
         """
