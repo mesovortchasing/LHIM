@@ -1446,7 +1446,7 @@ m.fit_bounds(bounds)
 m.options["maxBounds"] = bounds
 m.options["maxBoundsViscosity"] = 1.0
     
-    folium.TileLayer("CartoDB dark_matter").add_to(m)
+folium.TileLayer("CartoDB dark_matter").add_to(m)
 
     # -----------------------------
     # RADAR GRID
