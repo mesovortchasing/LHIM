@@ -133,14 +133,17 @@ def calculate_full_physics(
     inland_decay=True,
 ):
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
+
     dx, dy = (lon - s_lon) * 53, (lat - s_lat) * 69
     r = np.sqrt(dx**2 + dy**2)
     angle = np.arctan2(dy, dx)
+
     if r < 1:
         r = 1
 
     front_mod = 1.0
     local_rh = rh
+
     if front_lat and lat > front_lat:
         front_dist = abs(lat - front_lat)
         front_mod = max(0.5, 1.0 - (front_dist * 0.2))
@@ -148,25 +151,45 @@ def calculate_full_physics(
 
     level_scale = {1000: 1.0, 925: 0.92, 850: 0.85, 500: 0.45, 200: 0.25}
     l_mult = level_scale.get(level, 1.0)
-    eff_v = v_max * (local_rh / 85.0) * (0.6 + outflow / 2.5) * sst_mult * l_mult * front_mod
+
+    eff_v = (
+        v_max
+        * (local_rh / 85.0)
+        * (0.6 + outflow / 2.5)
+        * sst_mult
+        * l_mult
+        * front_mod
+    )
 
     B = 1.3 + (eff_v / 150)
-    v_sym = eff_v * np.sqrt((r_max / r) ** B * np.exp(1 - (r_max / r) ** B))
+
+    v_sym = eff_v * np.sqrt(
+        (r_max / r) ** B * np.exp(1 - (r_max / r) ** B)
+    )
 
     shear_rad = np.radians(shear_dir)
     shear_effect = 1 + ((1.0 - symmetry) * (shear_mag / 45)) * np.cos(angle - shear_rad)
 
     inflow = 25 if level > 500 else -30
-    wind_angle_rad = angle + (np.pi / 2) + np.radians(inflow if r > r_max else inflow / 2)
-    v_forward = f_speed * 0.5 * np.cos(wind_angle_rad - np.radians(f_dir))
 
-    surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
+    wind_angle_rad = angle + (np.pi / 2) + np.radians(
+        inflow if r > r_max else inflow / 2
+    )
 
-    # --- NEW: boost wind using pressure gradient approximation ---
+    v_forward = f_speed * 0.5 * np.cos(
+        wind_angle_rad - np.radians(f_dir)
+    )
+
+    surface_wind = max(
+        0,
+        ((v_sym * shear_effect) + v_forward) * terrain_friction
+    )
+
+    # --- pressure gradient boost ---
     gradient_boost = (v_max / max(r_max, 1)) * 0.08
     surface_wind *= (1.0 + gradient_boost)
 
-    # Inland decay / land interaction refinement.
+    # --- inland decay ---
     if inland_decay:
         if lat > 30.15:
             inland_miles = (lat - 30.15) * 69
@@ -191,27 +214,15 @@ def get_synthetic_products(
     cone_of_silence=True,
 ):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
-w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, v_max, r_max, motion_dir, motion_speed, shear, terrain, inland_decay)
 
-# --- Pressure gradient + wind vector ---
-base_mslp = calculate_mslp(v_max, 0)
-p_center = calculate_mslp(v_max, 1012 - base_mslp)
+    w, wd, r = calculate_full_physics(
+        lat, lon, s_lat, s_lon, p,
+        micro_scale=micro_scale,
+        front_lat=front_lat,
+        terrain_friction=terrain_friction,
+    )
 
-p_neighbors = [
-    p_center * (1 + np.random.uniform(-0.01, 0.01)),
-    p_center * (1 + np.random.uniform(-0.01, 0.01)),
-    p_center * (1 + np.random.uniform(-0.01, 0.01)),
-    p_center * (1 + np.random.uniform(-0.01, 0.01)),
-]
-
-distances = [1, 1, 1, 1]
-
-gradient = compute_pressure_gradient(p_center, p_neighbors, distances)
-gx = (p_neighbors[2] - p_neighbors[3]) * 0.5
-gy = (p_neighbors[0] - p_neighbors[1]) * 0.5
-
-u, v = compute_wind_vector(gx, gy)
-angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
+    angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
 
 is_major = v_max >= 96
 shear_rad = np.radians(shear_dir)
@@ -232,12 +243,14 @@ front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > fron
         bands = max(bands, outer_ring)
 
     dbz = max(eyewall, shield, bands, front_rain) * symmetry
-    if r < r_max * (0.15 if is_major else 0.4):
+
+    if r < r_max * (0.15 if v_max >= 96 else 0.4):
         dbz *= 0.1
 
     if radar_coords:
         rdx, rdy = (lon - radar_coords[1]) * 53, (lat - radar_coords[0]) * 69
         angle_to_radar = np.arctan2(rdy, rdx)
+
         radial_v = (w * 1.15) * np.cos(np.radians(wd) - angle_to_radar)
         aliased_v = np.clip(radial_v, -149, 149)
 
@@ -267,7 +280,8 @@ front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > fron
 
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
 
-    return min(78, dbz), aliased_v, surge, prob, beam_height_km 
+    return min(78, dbz), aliased_v, surge, prob, beam_height_km
+
 # -----------------------------
 # 2. MOBILE COUNTY ZONES & CITIES
 # -----------------------------
