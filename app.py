@@ -1597,58 +1597,62 @@ k2.metric("RADAR VEL", f"{env['vel']:.0f} kt")
 st.divider()
 st.subheader("⏱️ 6-Hour Impact Forecast")
 
-    st.dataframe(pd.DataFrame(forecast_rows), hide_index=True, use_container_width=True)
+st.dataframe(pd.DataFrame(forecast_rows), hide_index=True, use_container_width=True)
 
-    st.divider()
-    st.subheader("🧭 Multi-Point Forecast")
-    mp_rows = []
-    for pt in forecast_track:
-        f_env = compute_local_environment(
-            click_lat, click_lon, pt["lat"], pt["lon"], p, radar_coords, front_lat,
-            pressure_drop_hpa=pressure_drop_hpa,
-            dry_air=dry_air,
-            urban_heat=urban_heat,
-            ewr_phase=ewr_phase,
-        )
-        mp_rows.append({
-            "Forecast": f"+{pt['hour']}h",
-            "Storm Lat": f"{pt['lat']:.2f}",
-            "Storm Lon": f"{pt['lon']:.2f}",
-            "Cone Radius": f"{pt['cone_radius_mi']:.0f} mi",
-            "Local Wind": f"{f_env['wind_kts']:.0f} kt / {f_env['wind_mph']:.0f} mph",
-            "Local Surge": f"{f_env['surge_ft']:.1f} ft",
-            "Condition": condition_from_wind(f_env["wind_kts"], f_env["radius_mi"], r_max),
-        })
-    st.dataframe(pd.DataFrame(mp_rows), hide_index=True, use_container_width=True)
+st.divider()
+st.subheader("🧭 Multi-Point Forecast")
 
-    st.divider()
-    st.subheader("🎯 Selected Zone Snapshot")
-    zlat, zlon = ZONES[selected_zone]["center"]
-    zenv = compute_local_environment(
-        zlat, zlon, current_lat, current_lon, p, radar_coords, front_lat,
+mp_rows = []
+for pt in forecast_track:
+    f_env = compute_local_environment(
+        click_lat, click_lon, pt["lat"], pt["lon"], p, radar_coords, front_lat,
         pressure_drop_hpa=pressure_drop_hpa,
         dry_air=dry_air,
         urban_heat=urban_heat,
         ewr_phase=ewr_phase,
     )
-    st.dataframe(pd.DataFrame([{
-        "Zone": selected_zone,
-        "Wind": f"{zenv['wind_kts']:.0f} kt / {zenv['wind_mph']:.0f} mph",
-        "Gust": f"{zenv['gust_kts']:.0f} kt / {zenv['gust_mph']:.0f} mph",
-        "Temp": f"{zenv['temp_f']:.0f}°F",
-        "Dewpoint": f"{zenv['dewp_f']:.0f}°F",
-        "Visibility": f"{zenv['visibility_mi']:.1f} mi",
-        "Rain Dir": zenv['rain_dir_text'],
-        "Surge": f"{zenv['surge_ft']:.1f} ft",
-        "Tornado": f"{zenv['tornado_label']} ({zenv['tornado_risk']:.0f})",
-    }]), hide_index=True, use_container_width=True)
+    mp_rows.append({
+        "Forecast": f"+{pt['hour']}h",
+        "Storm Lat": f"{pt['lat']:.2f}",
+        "Storm Lon": f"{pt['lon']:.2f}",
+        "Cone Radius": f"{pt['cone_radius_mi']:.0f} mi",
+        "Local Wind": f"{f_env['wind_kts']:.0f} kt / {f_env['wind_mph']:.0f} mph",
+        "Local Surge": f"{f_env['surge_ft']:.1f} ft",
+        "Condition": condition_from_wind(f_env["wind_kts"], f_env["radius_mi"], r_max),
+    })
 
+st.dataframe(pd.DataFrame(mp_rows), hide_index=True, use_container_width=True)
+
+st.divider()
+st.subheader("🎯 Selected Zone Snapshot")
+
+zlat, zlon = ZONES[selected_zone]["center"]
+zenv = compute_local_environment(
+    zlat, zlon, current_lat, current_lon, p, radar_coords, front_lat,
+    pressure_drop_hpa=pressure_drop_hpa,
+    dry_air=dry_air,
+    urban_heat=urban_heat,
+    ewr_phase=ewr_phase,
+)
+
+st.dataframe(pd.DataFrame([{
+    "Zone": selected_zone,
+    "Wind": f"{zenv['wind_kts']:.0f} kt / {zenv['wind_mph']:.0f} mph",
+    "Gust": f"{zenv['gust_kts']:.0f} kt / {zenv['gust_mph']:.0f} mph",
+    "Temp": f"{zenv['temp_f']:.0f}°F",
+    "Dewpoint": f"{zenv['dewp_f']:.0f}°F",
+    "Visibility": f"{zenv['visibility_mi']:.1f} mi",
+    "Rain Dir": zenv['rain_dir_text'],
+    "Surge": f"{zenv['surge_ft']:.1f} ft",
+    "Tornado": f"{zenv['tornado_label']} ({zenv['tornado_risk']:.0f})",
+}]), hide_index=True, use_container_width=True)
 
 # -----------------------------
 # 8. COUNTY-WIDE ZONE TABLE
 # -----------------------------
 st.divider()
 st.subheader("📊 Mobile County 12-Zone Dynamic Summary")
+
 summary_df = zone_summary_table(
     current_lat,
     current_lon,
@@ -1660,9 +1664,8 @@ summary_df = zone_summary_table(
     urban_heat,
     ewr_phase,
 )
+
 st.dataframe(summary_df, hide_index=True, use_container_width=True)
-
-
 # -----------------------------
 # 9. AUTOMATED LOOP ENGINE
 # -----------------------------
