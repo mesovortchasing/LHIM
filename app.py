@@ -1064,21 +1064,21 @@ def build_extreme_wind_warning_polygon(
     roughness_factor = 1.0 + (urban_factor * 0.35) + ((1.0 - terrain_friction) * 0.4)
 
     # -----------------------------
-# DYNAMIC SIZE (RMW-DRIVEN)
-# -----------------------------
-base = r_max
+    # DYNAMIC SIZE (RMW-DRIVEN)
+    # -----------------------------
+    base = r_max
 
-lead_miles = (base * 1.8 + forward_speed * 1.6) * intensity_factor * asymmetry_factor
-trail_miles = base * 0.6 * roughness_factor
+    lead_miles = (base * 1.8 + forward_speed * 1.6) * intensity_factor * asymmetry_factor
+    trail_miles = base * 0.6 * roughness_factor
 
-half_width_left = base * 0.7 * roughness_factor
-half_width_right = base * 1.0 * intensity_factor * asymmetry_factor
+    half_width_left = base * 0.7 * roughness_factor
+    half_width_right = base * 1.0 * intensity_factor * asymmetry_factor
 
-# soft caps (less restrictive)
-lead_miles = np.clip(lead_miles, 25, 140)
-trail_miles = np.clip(trail_miles, 10, 45)
-half_width_left = np.clip(half_width_left, 10, 45)
-half_width_right = np.clip(half_width_right, 15, 65)
+    # soft caps (less restrictive)
+    lead_miles = np.clip(lead_miles, 25, 140)
+    trail_miles = np.clip(trail_miles, 10, 45)
+    half_width_left = np.clip(half_width_left, 10, 45)
+    half_width_right = np.clip(half_width_right, 15, 65)
 
     front_lat, front_lon = offset_latlon(center_lat, center_lon, lead_miles, heading_deg)
     rear_lat, rear_lon = offset_latlon(center_lat, center_lon, trail_miles, heading_deg + 180)
@@ -1134,6 +1134,7 @@ def generate_fake_ugc():
     zone_part = str(np.random.randint(1, 999)).zfill(3)
     return f"ALC{county_part}-{zone_part}"
 
+
 def build_localized_risk_text(selected_places, gust_mph):
     place_bits = []
 
@@ -1161,7 +1162,6 @@ def build_localized_risk_text(selected_places, gust_mph):
         return severity_line
 
     return severity_line + " " + " ".join(place_bits)
-
 
 def summarize_place_terrain(selected_places):
     terrain_bits = []
