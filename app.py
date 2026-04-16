@@ -1580,46 +1580,22 @@ env = compute_local_environment(
     ewr_phase=ewr_phase,
 )
 
-    k1, k2 = st.columns(2)
-    k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
-    k1.metric("DEW PT", f"{env['dewp_f']:.0f}°F")
-    k1.metric("VISIBILITY", f"{env['visibility_mi']:.1f} mi")
-    k1.metric("SURGE", f"{env['surge_ft']:.1f} ft")
-    k1.metric("BEAM HT", f"{env['beam_height_km']:.1f} km")
+k1, k2 = st.columns(2)
 
-    k2.metric("WIND", f"{env['wind_kts']:.0f} kt / {env['wind_mph']:.0f} mph")
-    k2.metric("GUST", f"{env['gust_kts']:.0f} kt / {env['gust_mph']:.0f} mph")
-    k2.metric("RAIN DIR", env['rain_dir_text'])
-    k2.metric("TORNADO", f"{env['tornado_label']} ({env['tornado_risk']:.0f})")
-    k2.metric("RADAR VEL", f"{env['vel']:.0f} kt")
+k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
+k1.metric("DEW PT", f"{env['dewp_f']:.0f}°F")
+k1.metric("VISIBILITY", f"{env['visibility_mi']:.1f} mi")
+k1.metric("SURGE", f"{env['surge_ft']:.1f} ft")
+k1.metric("BEAM HT", f"{env['beam_height_km']:.1f} km")
 
-    st.divider()
-    st.subheader("⏱️ 6-Hour Impact Forecast")
+k2.metric("WIND", f"{env['wind_kts']:.0f} kt / {env['wind_mph']:.0f} mph")
+k2.metric("GUST", f"{env['gust_kts']:.0f} kt / {env['gust_mph']:.0f} mph")
+k2.metric("RAIN DIR", env['rain_dir_text'])
+k2.metric("TORNADO", f"{env['tornado_label']} ({env['tornado_risk']:.0f})")
+k2.metric("RADAR VEL", f"{env['vel']:.0f} kt")
 
-    forecast_rows = []
-    for hour in range(1, 7):
-        f_dist = (f_speed * (current_time_offset + hour)) / 69.0
-        f_lat = l_lat + (f_dist * np.cos(np.radians(f_dir)))
-        f_lon = l_lon + (f_dist * np.sin(np.radians(f_dir)))
-
-        f_env = compute_local_environment(
-            click_lat, click_lon, f_lat, f_lon, p, radar_coords, front_lat,
-            pressure_drop_hpa=pressure_drop_hpa,
-            dry_air=dry_air,
-            urban_heat=urban_heat,
-            ewr_phase=ewr_phase,
-        )
-
-        forecast_rows.append({
-            "Time": f"T+{hour}h",
-            "Condition": condition_from_wind(f_env["wind_kts"], f_env["radius_mi"], r_max),
-            "Wind": f"{f_env['wind_kts']:.0f} kt / {f_env['wind_mph']:.0f} mph",
-            "Gust": f"{f_env['gust_kts']:.0f} kt / {f_env['gust_mph']:.0f} mph",
-            "Temp": f"{f_env['temp_f']:.0f}°F",
-            "Visibility": f"{f_env['visibility_mi']:.1f} mi",
-            "Surge": f"{f_env['surge_ft']:.1f} ft",
-            "Tornado": f"{f_env['tornado_label']} ({f_env['tornado_risk']:.0f})",
-        })
+st.divider()
+st.subheader("⏱️ 6-Hour Impact Forecast")
 
     st.dataframe(pd.DataFrame(forecast_rows), hide_index=True, use_container_width=True)
 
