@@ -1461,9 +1461,6 @@ if (
 # -----------------------------
 # MAP + PANEL (STABLE FINAL)
 # -----------------------------
-c1, c2 = st.columns([4, 1])
-
-with c1:
     m = folium.Map(
         location=[30.5, -88.5],  # center on Mobile area
         zoom_start=7,
@@ -1652,8 +1649,6 @@ map_data = st_folium(
     returned_objects=["last_clicked"]
 )
 
-
-with c2:
     st.subheader("⚠️ Warning Panel")
 
     if show_warning_text_panel and warnings_active:
