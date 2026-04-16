@@ -1309,14 +1309,13 @@ with col_top_right:
 
 
 # -----------------------------
-# 7. MAP & DASHBOARD
+# 7. MAP & DASHBOARD (ONLY ONE)
 # -----------------------------
 c1, c2 = st.columns([4, 1.8])
 
 with c1:
-
     # -----------------------------
-    # BUILD MAP
+    # MAP BUILD (ORIGINAL FULL VERSION)
     # -----------------------------
     if basemap_mode == "Dark":
         m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
@@ -1332,7 +1331,6 @@ with c1:
                 control=True,
                 show=False,
             ).add_to(m)
-
     elif basemap_mode == "Street":
         m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
         if enable_street:
@@ -1347,7 +1345,6 @@ with c1:
                 control=True,
                 show=False,
             ).add_to(m)
-
     else:
         m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
         if enable_satellite:
@@ -1374,7 +1371,7 @@ with c1:
         ).add_to(m)
 
     # -----------------------------
-    # RADAR GRID
+    # RADAR GRID (UNCHANGED)
     # -----------------------------
     lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
     lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
@@ -1392,13 +1389,14 @@ with c1:
                 ewr_phase=ewr_phase,
             )
 
+            color = None
             if radar_view == "Reflectivity (dBZ)":
                 color = nws_reflectivity_color(dbz)
             elif radar_view == "Velocity (kts)":
                 color = velocity_color_hyperrealistic(vel)
             elif radar_view == "Storm Surge":
                 color = surge_color(surge)
-            else:
+            elif radar_view == "Wind Prob.":
                 color = wind_prob_color(prob)
 
             if color:
@@ -1411,16 +1409,12 @@ with c1:
                 ).add_to(m)
 
     # -----------------------------
-    # DEFAULT INSPECTOR POSITION
+    # INSPECTOR (FIXED - SINGLE INSTANCE)
     # -----------------------------
     inspect_lat, inspect_lon = current_lat, current_lon
-
     if "last_click" in st.session_state:
         inspect_lat, inspect_lon = st.session_state.last_click
 
-    # -----------------------------
-    # DRAW INSPECTOR MARKER
-    # -----------------------------
     if st.session_state.inspector_mode:
         folium.Marker(
             [inspect_lat, inspect_lon],
@@ -1429,55 +1423,35 @@ with c1:
         ).add_to(m)
 
     # -----------------------------
-    # RENDER MAP (ONLY ONCE)
+    # FINAL RENDER (ONLY ONCE)
     # -----------------------------
     map_data = st_folium(
         m,
         width="100%",
-        height=750,
-        key=f"map_{st.session_state.loop_idx}",
+        height=770,
+        key=f"map_frame_{st.session_state.loop_idx}",
         returned_objects=["last_clicked"],
     )
 
-    # -----------------------------
-    # UPDATE CLICK LOCATION
-    # -----------------------------
     if map_data and map_data.get("last_clicked"):
-        inspect_lat = map_data["last_clicked"]["lat"]
-        inspect_lon = map_data["last_clicked"]["lng"]
-        st.session_state.last_click = (inspect_lat, inspect_lon)
+        st.session_state.last_click = (
+            map_data["last_clicked"]["lat"],
+            map_data["last_clicked"]["lng"]
+        )
 
-    # -----------------------------
-    # INSPECTOR PANEL
-    # -----------------------------
     if st.session_state.inspector_mode:
         dbz, vel, surge, prob, beam = get_synthetic_products(
-            inspect_lat,
-            inspect_lon,
-            current_lat,
-            current_lon,
-            p,
+            inspect_lat, inspect_lon, current_lat, current_lon, p,
             radar_coords=radar_coords
         )
 
-        vel_mph = vel * 1.15078
-
         st.markdown(f"""
-        <div style="
-            position: fixed;
-            top: 70px;
-            right: 20px;
-            background: rgba(0,0,0,0.6);
-            padding: 10px 14px;
-            border-radius: 8px;
-            color: white;
-            font-size: 14px;
-            z-index: 9999;
-        ">
-            <b>Inspector</b><br>
-            Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
-            Reflectivity: {dbz:.1f} dBZ<br>
-            Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
+        <div style="position: fixed; top:70px; right:20px;
+        background: rgba(0,0,0,0.6); padding:10px; border-radius:8px; color:white;">
+        <b>Inspector</b><br>
+        Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
+        Reflectivity: {dbz:.1f} dBZ<br>
+        Velocity: {vel:.1f} kt
         </div>
         """, unsafe_allow_html=True)
 
