@@ -1550,6 +1550,37 @@ with c1:
                 "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
                 "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
             }]), hide_index=True, use_container_width=True)
+
+# -----------------------------
+# CLICK LOCATION (RESTORE)
+# -----------------------------
+click_lat = None
+click_lon = None
+
+if map_data and map_data.get("last_clicked"):
+    click_lat = map_data["last_clicked"]["lat"]
+    click_lon = map_data["last_clicked"]["lng"]
+else:
+    click_lat, click_lon = current_lat, current_lon
+
+
+# -----------------------------
+# ENVIRONMENT (CRITICAL FIX)
+# -----------------------------
+env = compute_local_environment(
+    click_lat,
+    click_lon,
+    current_lat,
+    current_lon,
+    p,
+    radar_coords,
+    front_lat,
+    pressure_drop_hpa=pressure_drop_hpa,
+    dry_air=dry_air,
+    urban_heat=urban_heat,
+    ewr_phase=ewr_phase,
+)
+
     
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
