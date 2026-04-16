@@ -1285,8 +1285,50 @@ col1, col2 = st.columns([0.9, 0.1])
 with col1:
     st.subheader("🗺️ Live Storm Map")
 
-    # 🔴 MOVE YOUR MAP CODE HERE
-    st.pydeck_chart(deck)
+    # -----------------------------
+    # BUILD MAP (THIS WAS MISSING)
+    # -----------------------------
+    if basemap_mode == "Dark":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
+        if enable_dark:
+            folium.TileLayer("CartoDB dark_matter").add_to(m)
+
+    elif basemap_mode == "Street":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
+        if enable_street:
+            folium.TileLayer("OpenStreetMap").add_to(m)
+
+    elif basemap_mode == "Satellite":
+        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
+        if enable_satellite:
+            folium.TileLayer(
+                tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+                attr="Satellite"
+            ).add_to(m)
+
+    # Optional traffic layer
+    if enable_traffic and traffic_tile_url:
+        folium.TileLayer(traffic_tile_url, name="Traffic").add_to(m)
+
+    # -----------------------------
+    # RENDER MAP + GET CLICK DATA
+    # -----------------------------
+    map_data = st_folium(
+        m,
+        width="100%",
+        height=700,
+        returned_objects=["last_clicked"],
+        key=f"map_{st.session_state.loop_idx}"
+    )
+
+    # -----------------------------
+    # INSPECTOR POSITION (ALWAYS DEFINED → FIXES YOUR CRASH)
+    # -----------------------------
+    if map_data and map_data.get("last_clicked"):
+        inspect_lat = map_data["last_clicked"]["lat"]
+        inspect_lon = map_data["last_clicked"]["lng"]
+    else:
+        inspect_lat, inspect_lon = current_lat, current_lon
 
 
 with col2:
@@ -1295,24 +1337,46 @@ with col2:
 
 
 # -----------------------------
-# INSPECTOR OVERLAY
+# INSPECTOR VISUAL + DATA
 # -----------------------------
 if st.session_state.inspector_mode:
-    st.markdown("""
+
+    # Marker on map location
+    folium.Marker(
+        [inspect_lat, inspect_lon],
+        icon=folium.Icon(color="white", icon="plus"),
+        tooltip="Inspector Point"
+    )
+
+    dbz, vel, surge, prob, beam = get_synthetic_products(
+        inspect_lat,
+        inspect_lon,
+        current_lat,
+        current_lon,
+        p,
+        radar_coords=radar_coords
+    )
+
+    vel_mph = vel * 1.15078
+
+    st.markdown(f"""
     <div style="
         position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 28px;
-        color: rgba(255,255,255,0.85);
-        pointer-events: none;
+        top: 70px;
+        right: 20px;
+        background: rgba(0,0,0,0.6);
+        padding: 10px 14px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
         z-index: 9999;
     ">
-        ✚
+        <b>Inspector</b><br>
+        Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
+        Reflectivity: {dbz:.1f} dBZ<br>
+        Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
     </div>
     """, unsafe_allow_html=True)
-
 
 # -----------------------------
 # STORM CALCULATIONS
