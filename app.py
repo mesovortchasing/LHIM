@@ -1222,6 +1222,17 @@ with st.sidebar:
     current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
     st.session_state.loop_idx = current_time_offset
 
+    with st.expander("🗺️ Base Map Controls", expanded=True):
+    basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
+    enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
+    enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
+    enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
+    enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
+    traffic_tile_url = st.text_input(
+        "Traffic Tile URL (optional / provider required)",
+        value=""
+    )
+
     # STORM STRUCTURE
     st.subheader("🌀 Storm Structure")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
@@ -1272,17 +1283,6 @@ col1, col2 = st.columns([0.9, 0.1])
 with col2:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
-
-    with st.expander("🗺️ Base Map Controls", expanded=True):
-        basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
-        enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
-        enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
-        enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
-        enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
-        traffic_tile_url = st.text_input(
-            "Traffic Tile URL (optional / provider required)",
-            value=""
-        )
 
 # --- INSPECTOR OVERLAY (OUTSIDE EVERYTHING IMPORTANT) ---
 if st.session_state.inspector_mode:
