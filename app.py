@@ -1423,67 +1423,26 @@ if (
     )
 
 # -----------------------------
-# 7. MAP & DASHBOARD (CLEAN SINGLE BUILD)
+# MAP + PANEL (FINAL CLEAN VERSION)
 # -----------------------------
 c1, c2 = st.columns([4, 1.8])
 
 with c1:
 
     # -----------------------------
-    # CREATE MAP FIRST (FIX)
+    # CREATE MAP
     # -----------------------------
-    m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+    m = folium.Map(
+        location=[30.75, -88.12],
+        zoom_start=9,
+        tiles=None,
+        control_scale=True
+    )
 
-    if basemap_mode == "Dark":
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", show=True).add_to(m)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", show=False).add_to(m)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                show=False,
-            ).add_to(m)
-
-    elif basemap_mode == "Street":
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", show=True).add_to(m)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", show=False).add_to(m)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                show=False,
-            ).add_to(m)
-
-    else:
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-                attr="Esri World Imagery",
-                name="Satellite",
-                show=True,
-            ).add_to(m)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", show=False).add_to(m)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", show=False).add_to(m)
-
-    if enable_traffic and traffic_tile_url.strip():
-        folium.TileLayer(
-            tiles=traffic_tile_url.strip(),
-            attr="Traffic",
-            name="Traffic",
-            overlay=True,
-            opacity=0.75,
-        ).add_to(m)
+    folium.TileLayer("CartoDB dark_matter").add_to(m)
 
     # -----------------------------
-    # RADAR GRID (ONCE)
+    # RADAR GRID
     # -----------------------------
     lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
     lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
@@ -1493,7 +1452,7 @@ with c1:
         for ln in lons:
             zone_name, zone_meta = get_zone_meta(lt, ln)
 
-            dbz, vel, surge, prob, beam_height_km = get_synthetic_products(
+            dbz, vel, surge, prob, beam = get_synthetic_products(
                 lt, ln, current_lat, current_lon, p,
                 radar_coords=radar_coords,
                 front_lat=front_lat,
@@ -1513,43 +1472,23 @@ with c1:
 
             if color:
                 folium.Rectangle(
-                    bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
+                    [[lt, ln], [lt + d_lat, ln + d_lon]],
                     color=color,
                     fill=True,
                     fill_opacity=0.55,
-                    weight=0,
+                    weight=0
                 ).add_to(m)
 
     # -----------------------------
-    # OVERLAYS (UNCHANGED)
+    # FORECAST TRACK
     # -----------------------------
-    if show_zone_boxes:
-        for zone_name, meta in ZONES.items():
-            (lat1, lon1), (lat2, lon2) = meta["bounds"]
-            folium.Rectangle(
-                bounds=[[lat1, lon1], [lat2, lon2]],
-                color="#6fa8dc",
-                fill=False,
-                weight=1.2,
-                tooltip=zone_name,
-            ).add_to(m)
-
-    if show_city_markers:
-        for city_name, (ct_lat, ct_lon) in CITY_POINTS.items():
-            folium.CircleMarker(
-                location=[ct_lat, ct_lon],
-                radius=3,
-                color="#ffffff",
-                fill=True,
-                fill_color="#00d4ff",
-                fill_opacity=0.85,
-                tooltip=city_name,
-            ).add_to(m)
-
     if show_forecast_track:
         track_coords = [(pt["lat"], pt["lon"]) for pt in forecast_track]
-        folium.PolyLine(track_coords, color="#ffffff", weight=2.2).add_to(m)
+        folium.PolyLine(track_coords, color="white", weight=2.2).add_to(m)
 
+    # -----------------------------
+    # STORM CENTER
+    # -----------------------------
     folium.Marker(
         [current_lat, current_lon],
         tooltip="Storm Center",
@@ -1557,7 +1496,35 @@ with c1:
     ).add_to(m)
 
     # -----------------------------
-    # INSPECTOR (SINGLE CLEAN SYSTEM)
+    # 🔴 EXTREME WIND WARNING POLYGON
+    # -----------------------------
+    if show_extreme_wind_warning and warning_polygon:
+        folium.Polygon(
+            locations=warning_polygon,
+            color="red",
+            weight=3,
+            fill=True,
+            fill_opacity=0.25,
+            tooltip="Extreme Wind Warning"
+        ).add_to(m)
+
+    # -----------------------------
+    # 🟡 CONE OF UNCERTAINTY
+    # -----------------------------
+    if show_cone and forecast_track:
+        cone_coords = [(pt["lat"], pt["lon"]) for pt in forecast_track]
+
+        folium.Polygon(
+            locations=cone_coords,
+            color="white",
+            weight=2,
+            fill=True,
+            fill_opacity=0.08,
+            tooltip="Cone of Uncertainty"
+        ).add_to(m)
+
+    # -----------------------------
+    # INSPECTOR SYSTEM
     # -----------------------------
     if "last_click" not in st.session_state:
         st.session_state.last_click = (current_lat, current_lon)
@@ -1575,10 +1542,8 @@ with c1:
     # -----------------------------
     map_data = st_folium(
         m,
-        width="100%",
         height=770,
-        key=f"map_frame_{st.session_state.loop_idx}",
-        returned_objects=["last_clicked"],
+        returned_objects=["last_clicked"]
     )
 
     if map_data and map_data.get("last_clicked"):
@@ -1605,88 +1570,6 @@ with c1:
         Velocity: {vel:.1f} kt
         </div>
         """, unsafe_allow_html=True)
-    
-with c2:
-    st.markdown(
-        """
-        <style>
-        .weather-card {
-            background-color: #003366;
-            color: white;
-            padding: 18px;
-            border-radius: 12px;
-            border-left: 8px solid #ffcc00;
-            margin-bottom: 10px;
-        }
-        .mini-note {
-            font-size: 0.82rem;
-            color: #b7d8ff;
-            line-height: 1.25;
-        }
-        .advisory-box {
-            background-color: #0f1117;
-            color: #e9eef7;
-            padding: 14px;
-            border-radius: 12px;
-            border: 1px solid #2a3950;
-            margin-bottom: 10px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    click_lat = None
-    click_lon = None
-    loc_name = None
-
-    if use_city_selection:
-        click_lat, click_lon = CITY_POINTS[selected_city]
-        loc_name = selected_city
-    elif map_data and map_data.get("last_clicked"):
-        click_lat = map_data["last_clicked"]["lat"]
-        click_lon = map_data["last_clicked"]["lng"]
-        try:
-            location = geolocator.reverse(f"{click_lat}, {click_lon}", timeout=3)
-            address = location.raw.get("address", {})
-            loc_name = address.get("city") or address.get("town") or address.get("village") or address.get("hamlet") or f"Grid {click_lat:.2f}, {click_lon:.2f}"
-        except Exception:
-            loc_name = f"Grid {click_lat:.2f}, {click_lon:.2f}"
-    else:
-        click_lat, click_lon = CITY_POINTS[selected_city]
-        loc_name = selected_city
-
-    env = compute_local_environment(
-        click_lat, click_lon, current_lat, current_lon, p, radar_coords, front_lat,
-        pressure_drop_hpa=pressure_drop_hpa,
-        dry_air=dry_air,
-        urban_heat=urban_heat,
-        ewr_phase=ewr_phase,
-    )
-
-    st.markdown(
-        f"""
-        <div class='weather-card'>
-            <h2>📍 {loc_name}</h2>
-            <h3>ZONE: {env['zone']}</h3>
-            <div class='mini-note'>AT T{current_time_offset:+} HOURS · Wind dir {env['wind_dir_text']} · Rain inflow {env['rain_dir_text']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""
-        <div class='advisory-box'>
-            <b>Storm Classification:</b> {storm_class}<br>
-            <b>Estimated MSLP:</b> {mslp:.0f} mb<br>
-            <b>Pressure Tendency:</b> {pressure_tendency:.1f} mb/hr<br>
-            <b>Max Sustained:</b> {v_max:.0f} kt / {kt_to_mph(v_max):.0f} mph<br>
-            <b>Radar Site:</b> {st.session_state.active_radar}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     if show_warning_text_panel and warning_polygon is not None:
         st.divider()
