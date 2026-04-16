@@ -1607,7 +1607,9 @@ map_data = st_folium(
 st.subheader("⚠️ Warning Panel")
 
 if show_warning_text_panel and warnings_active:
+    if poly and len(poly) >= 5:
     selected_places = pick_impacted_places(poly, CITY_POINTS)
+
     warning_text = generate_extreme_wind_warning_text(
         poly,
         l_lat, l_lon,
@@ -1620,6 +1622,8 @@ if show_warning_text_panel and warnings_active:
     )
 
     st.text_area("Warning Text", warning_text, height=400)
+else:
+    st.warning("Polygon not large enough to generate warning text.")
 
 # -----------------------------
 # CLICK UPDATE
