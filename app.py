@@ -31,6 +31,13 @@ from geopy.geocoders import Nominatim
 # This app supports it if you provide a tile URL in the sidebar.
 # =========================================================
 
+#Inspired Inspector Tool 
+if "inspector_mode" not in st.session_state:
+    st.session_state.inspector_mode = False
+
+def toggle_inspector():
+    st.session_state.inspector_mode = not st.session_state.inspector_mode
+
 # -----------------------------
 # 1. CORE PHYSICS & RADAR ENGINE
 # -----------------------------
@@ -1173,6 +1180,12 @@ with st.sidebar:
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
 
+col1, col2 = st.columns([0.9, 0.1])
+
+with col2:
+    if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
+        st.session_state.inspector_mode = not st.session_state.inspector_mode
+    
     with st.expander("🗺️ Base Map Controls", expanded=True):
         basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
         enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
@@ -1185,6 +1198,22 @@ with st.sidebar:
             help="Paste a valid traffic tile endpoint if you have one. True live traffic usually requires a provider/API key."
         )
 
+    if st.session_state.inspector_mode:
+    st.markdown("""
+    <div style="
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 28px;
+        color: rgba(255,255,255,0.85);
+        pointer-events: none;
+        z-index: 9999;
+    ">
+        ✚
+    </div>
+    """, unsafe_allow_html=True)
+    
     with st.expander("⚠️ Warning Settings", expanded=False):
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
@@ -1559,6 +1588,56 @@ with c1:
         key=f"map_frame_{st.session_state.loop_idx}",
         returned_objects=["last_clicked"],
     )
+
+if st.session_state.inspector_mode:
+
+    dbz, vel, surge, prob, beam = get_synthetic_products(
+        center_lat,
+        center_lon,
+        s_lat,
+        s_lon,
+        p,
+        radar_coords=radar_coords
+    )
+
+    vel_mph = vel * 1.15078
+
+if map_data and "center" in map_data:
+    center_lat = map_data["center"]["lat"]
+    center_lon = map_data["center"]["lng"]
+else:
+    center_lat, center_lon = s_lat, s_lon
+
+if st.session_state.inspector_mode:
+
+    dbz, vel, surge, prob, beam = get_synthetic_products(
+        center_lat,
+        center_lon,
+        s_lat,
+        s_lon,
+        p,
+        radar_coords=radar_coords
+    )
+
+    vel_mph = vel * 1.15078
+
+    st.markdown(f"""
+    <div style="
+        position: fixed;
+        top: 70px;
+        right: 20px;
+        background: rgba(0,0,0,0.6);
+        padding: 10px 14px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        z-index: 9999;
+    ">
+        <b>Inspector</b><br>
+        Reflectivity: {dbz:.1f} dBZ<br>
+        Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
+    </div>
+    """, unsafe_allow_html=True)
 
 with c2:
     st.markdown(
