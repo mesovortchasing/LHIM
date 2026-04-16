@@ -1198,7 +1198,7 @@ with col2:
             help="Paste a valid traffic tile endpoint if you have one. True live traffic usually requires a provider/API key."
         )
 
-    if st.session_state.inspector_mode:
+if st.session_state.inspector_mode:
     st.markdown("""
     <div style="
         position: fixed;
