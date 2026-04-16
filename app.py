@@ -1539,13 +1539,13 @@ folium.Marker(
 # -----------------------------
 if show_extreme_wind_warning and warning_polygon is not None and len(warning_polygon) > 2:
     if poly and len(poly) >= 3:
-    folium.Polygon(
-        locations=poly,
-        color="red",
-        fill=True,
-        fill_opacity=extreme_opacity,
-        weight=2
-    ).add_to(m)
+        folium.Polygon(
+            locations=poly,
+            color="red",
+            fill=True,
+            fill_opacity=extreme_opacity,
+            weight=2
+        ).add_to(m)
 
 # -----------------------------
 # CONE OF UNCERTAINTY (REAL)
@@ -1572,7 +1572,6 @@ if show_cone and forecast_track:
         fill_opacity=0.08,
         tooltip="Cone of Uncertainty"
     ).add_to(m)
-
 # -----------------------------
 # CLICK / INSPECTOR STATE
 # -----------------------------
