@@ -1193,7 +1193,6 @@ if "is_playing" not in st.session_state:
 
 geolocator = Nominatim(user_agent="lhim_mobile_county_v40_hyperrealistic")
 
-
 # -----------------------------
 # 6. UI & SIDEBAR
 # -----------------------------
@@ -1222,7 +1221,7 @@ with st.sidebar:
     current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
     st.session_state.loop_idx = current_time_offset
 
-    # ✅ ONLY base map stuff in here
+    # BASE MAP CONTROLS
     with st.expander("🗺️ Base Map Controls", expanded=True):
         basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
         enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
@@ -1234,7 +1233,7 @@ with st.sidebar:
             value=""
         )
 
-    # ✅ NOW BACK TO NORMAL SIDEBAR (NOT inside expander)
+    # STORM STRUCTURE
     st.subheader("🌀 Storm Structure")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
@@ -1278,14 +1277,26 @@ with st.sidebar:
     use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
 
 
-# --- MAIN LAYOUT ---
+# -----------------------------
+# MAIN LAYOUT (MAP GOES HERE)
+# -----------------------------
 col1, col2 = st.columns([0.9, 0.1])
+
+with col1:
+    st.subheader("🗺️ Live Storm Map")
+
+    # 🔴 MOVE YOUR MAP CODE HERE
+    st.pydeck_chart(deck)
+
 
 with col2:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
 
-# --- INSPECTOR OVERLAY (OUTSIDE EVERYTHING IMPORTANT) ---
+
+# -----------------------------
+# INSPECTOR OVERLAY
+# -----------------------------
 if st.session_state.inspector_mode:
     st.markdown("""
     <div style="
@@ -1304,7 +1315,7 @@ if st.session_state.inspector_mode:
 
 
 # -----------------------------
-# STORM CALCULATIONS (GLOBAL SCOPE)
+# STORM CALCULATIONS
 # -----------------------------
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
@@ -1376,6 +1387,7 @@ if (
         landfall_env["gust_mph"],
         warning_places,
     )
+
 # -----------------------------
 # 7. MAP & DASHBOARD
 # -----------------------------
