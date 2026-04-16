@@ -1207,7 +1207,6 @@ with st.sidebar:
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
 
-    # RADAR CONTROLS
     st.subheader("📡 Radar Controls")
     st.session_state.active_radar = st.selectbox(
         "Radar Site",
@@ -1221,19 +1220,14 @@ with st.sidebar:
     current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
     st.session_state.loop_idx = current_time_offset
 
-    # BASE MAP CONTROLS
     with st.expander("🗺️ Base Map Controls", expanded=True):
         basemap_mode = st.selectbox("Base Map", ["Dark", "Street", "Satellite"], index=0)
         enable_satellite = st.checkbox("Enable Satellite Layer Toggle", value=True)
         enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
         enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
         enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
-        traffic_tile_url = st.text_input(
-            "Traffic Tile URL (optional / provider required)",
-            value=""
-        )
+        traffic_tile_url = st.text_input("Traffic Tile URL", value="")
 
-    # STORM STRUCTURE
     st.subheader("🌀 Storm Structure")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
@@ -1243,8 +1237,7 @@ with st.sidebar:
     l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
     res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
-    # WARNINGS
-    with st.expander("⚠️ Warning Settings", expanded=False):
+    with st.expander("⚠️ Warning Settings"):
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
         extreme_wind_threshold_mph = st.slider("Extreme Wind Warning Trigger (mph)", 80, 140, 115)
@@ -1255,9 +1248,8 @@ with st.sidebar:
         show_forecast_track = st.checkbox("Show Forecast Track", value=True)
         show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
 
-    # ENVIRONMENT
     with st.expander("🌡️ Environmental Layers", expanded=True):
-        season_month = st.selectbox("Seasonal SST Month", ["June", "July", "August", "September", "October", "November"], index=3)
+        season_month = st.selectbox("Seasonal SST Month", ["June","July","August","September","October","November"], index=3)
         sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
         front_lat = st.slider("Cold Front Latitude", 30.0, 32.5, 31.8)
         shear_mag = st.slider("Deep Layer Shear (kts)", 0, 80, 15)
@@ -1270,11 +1262,11 @@ with st.sidebar:
         urban_heat = st.slider("Urban Heat Bias", 0.0, 4.0, 1.2, 0.1)
         ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
 
-    # LOCATION
     st.subheader("📍 Mobile County Selector")
     selected_zone = st.selectbox("Zone", list(ZONES.keys()), index=list(ZONES.keys()).index("Downtown-Mobile"))
     selected_city = st.selectbox("City / Place", list(CITY_POINTS.keys()), index=list(CITY_POINTS.keys()).index("Mobile"))
     use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
+
 
 # -----------------------------
 # STORM CALCULATIONS
@@ -1284,43 +1276,35 @@ current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
 current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
 
 p = [
-    v_max,
-    r_max,
-    f_speed,
-    f_dir,
-    shear_mag,
-    shear_dir,
-    rh,
-    outflow,
-    symmetry,
-    get_sst_mult(season_month, sst_boost),
+    v_max, r_max, f_speed, f_dir,
+    shear_mag, shear_dir, rh, outflow,
+    symmetry, get_sst_mult(season_month, sst_boost),
 ]
 
 radar_coords = RADAR_SITES[st.session_state.active_radar]
 
+
 # -----------------------------
-# MAIN LAYOUT (MAP AT TOP)
+# TOP BAR
 # -----------------------------
 col_top_left, col_top_right = st.columns([0.92, 0.08])
-
 with col_top_right:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
 
 
 # -----------------------------
-# 7. MAP & DASHBOARD (ONLY ONE)
+# MAP + PANEL
 # -----------------------------
 c1, c2 = st.columns([4, 1.8])
 
 with c1:
-    # -----------------------------
-    # MAP BUILD (ORIGINAL FULL VERSION)
-    # -----------------------------
+    # ✅ CREATE MAP FIRST (CRITICAL FIX)
+    m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
 
-    # -----------------------------
-    # RADAR GRID (UNCHANGED)
-    # -----------------------------
+    folium.TileLayer("CartoDB dark_matter").add_to(m)
+
+    # RADAR GRID
     lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
     lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
     d_lat, d_lon = lats[1] - lats[0], lons[1] - lons[0]
@@ -1328,7 +1312,8 @@ with c1:
     for lt in lats:
         for ln in lons:
             zone_name, zone_meta = get_zone_meta(lt, ln)
-            dbz, vel, surge, prob, beam_height_km = get_synthetic_products(
+
+            dbz, vel, surge, prob, beam = get_synthetic_products(
                 lt, ln, current_lat, current_lon, p,
                 radar_coords=radar_coords,
                 front_lat=front_lat,
@@ -1337,56 +1322,38 @@ with c1:
                 ewr_phase=ewr_phase,
             )
 
-            color = None
             if radar_view == "Reflectivity (dBZ)":
                 color = nws_reflectivity_color(dbz)
             elif radar_view == "Velocity (kts)":
                 color = velocity_color_hyperrealistic(vel)
             elif radar_view == "Storm Surge":
                 color = surge_color(surge)
-            elif radar_view == "Wind Prob.":
+            else:
                 color = wind_prob_color(prob)
 
             if color:
                 folium.Rectangle(
-                    bounds=[[lt, ln], [lt + d_lat, ln + d_lon]],
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.55,
-                    weight=0,
+                    [[lt, ln], [lt + d_lat, ln + d_lon]],
+                    color=color, fill=True, fill_opacity=0.55, weight=0
                 ).add_to(m)
 
-    # -----------------------------
-    # INSPECTOR (FIXED - SINGLE INSTANCE)
-    # -----------------------------
-    inspect_lat, inspect_lon = current_lat, current_lon
-    if "last_click" in st.session_state:
-        inspect_lat, inspect_lon = st.session_state.last_click
+    # INSPECTOR SAFE INIT
+    if "last_click" not in st.session_state:
+        st.session_state.last_click = (current_lat, current_lon)
+
+    inspect_lat, inspect_lon = st.session_state.last_click
 
     if st.session_state.inspector_mode:
-        folium.Marker(
-            [inspect_lat, inspect_lon],
-            icon=folium.Icon(color="white", icon="plus"),
-            tooltip="Inspector Point"
-        ).add_to(m)
+        folium.Marker([inspect_lat, inspect_lon]).add_to(m)
 
-    # -----------------------------
-    # FINAL RENDER (ONLY ONCE)
-    # -----------------------------
-    map_data = st_folium(
-        m,
-        width="100%",
-        height=770,
-        key=f"map_frame_{st.session_state.loop_idx}",
-        returned_objects=["last_clicked"],
-    )
+    # RENDER ONCE
+    map_data = st_folium(m, height=770, returned_objects=["last_clicked"])
 
     if map_data and map_data.get("last_clicked"):
         st.session_state.last_click = (
             map_data["last_clicked"]["lat"],
             map_data["last_clicked"]["lng"]
         )
-
     if st.session_state.inspector_mode:
         dbz, vel, surge, prob, beam = get_synthetic_products(
             inspect_lat, inspect_lon, current_lat, current_lon, p,
