@@ -7,7 +7,17 @@ from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 import time
 from geopy.geocoders import Nominatim
+
 st.set_page_config(layout="wide")
+
+from shapely.geometry import shape, Polygon
+
+import json
+
+with open("counties.geojson") as f:
+    counties_geo = json.load(f)
+    st.write("County count:", len(counties_geo["features"]))
+    
 # =========================================================
 # LHIM MOBILE COUNTY v4.0 HYPERREALISTIC
 # Built as a drop-in extension of the user's v3.0 sandbox.
@@ -1556,47 +1566,102 @@ if show_cone and forecast_track:
     ).add_to(m)
 
 # -----------------------------
-# WARNINGS (FIXED)
+# WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
+from shapely.geometry import Polygon, shape
+
 dist_to_landfall = np.hypot((current_lat - l_lat) * 69, (current_lon - l_lon) * 53)
 warnings_active = dist_to_landfall <= warning_distance_trigger
 
+impacted_counties = []
+warning_shape = None
+
+# -----------------------------
+# EXTREME WIND WARNING
+# -----------------------------
 if show_extreme_wind_warning and warnings_active:
+
     poly = build_extreme_wind_warning_polygon(
         current_lat, current_lon, f_dir, f_speed,
         r_max, v_max, symmetry, shear_mag,
         landfall_zone_meta["terrain_friction"], urban_heat
     )
-    if poly and len(poly) >= 3:
-        folium.Polygon(
-            locations=poly,
-            color="red",
-            fill=True,
-            fill_opacity=extreme_opacity,
-            weight=2
-        ).add_to(m)
 
+    st.write("Poly length:", len(poly) if poly else 0)
+
+    # Convert to shapely
+    if poly and len(poly) >= 3:
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+    # Find + draw counties
+    if warning_shape:
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+
+                # Save county name
+                name = feature["properties"].get("NAME", "Unknown")
+                impacted_counties.append(f"{name} County")
+
+                # DRAW COUNTY (THIS REPLACES POLYGON)
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda x: {
+                        "fillColor": "red",
+                        "color": "red",
+                        "weight": 1,
+                        "fillOpacity": 0.4,
+                    },
+                ).add_to(m)
+
+# -----------------------------
+# HURRICANE WARNING (optional upgrade later)
+# -----------------------------
 if show_hurricane_warning and warnings_active:
-    poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
-    if poly and len(poly) >= 3:
-        folium.Polygon(
-            locations=poly,
-            color="orange",
-            fill=True,
-            fill_opacity=extreme_opacity,
-            weight=2
-        ).add_to(m)
 
-if show_surge_warning and warnings_active:
-    poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
+    poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
+
     if poly and len(poly) >= 3:
-        folium.Polygon(
-            locations=poly,
-            color="purple",
-            fill=True,
-            fill_opacity=extreme_opacity,
-            weight=2
-        ).add_to(m)
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda x: {
+                        "fillColor": "orange",
+                        "color": "orange",
+                        "weight": 1,
+                        "fillOpacity": 0.35,
+                    },
+                ).add_to(m)
+
+# -----------------------------
+# SURGE WARNING (optional)
+# -----------------------------
+if show_surge_warning and warnings_active:
+
+    poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
+
+    if poly and len(poly) >= 3:
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda x: {
+                        "fillColor": "purple",
+                        "color": "purple",
+                        "weight": 1,
+                        "fillOpacity": 0.35,
+                    },
+                ).add_to(m)
 
 # -----------------------------
 # RENDER MAP
@@ -1616,22 +1681,22 @@ st.subheader("⚠️ Warning Panel")
 
 if show_warning_text_panel and warnings_active:
     if poly and len(poly) >= 5:
-        selected_places = pick_impacted_places(poly, CITY_POINTS)
+    selected_places = impacted_counties[:6]
 
-        warning_text = generate_extreme_wind_warning_text(
-            poly,
-            l_lat, l_lon,
-            current_lat, current_lon,
-            f_dir, f_speed,
-            v_max,
-            kt_to_mph(v_max),
-            kt_to_mph(v_max) * 1.2,
-            selected_places
-        )
+    warning_text = generate_extreme_wind_warning_text(
+        poly,
+        l_lat, l_lon,
+        current_lat, current_lon,
+        f_dir, f_speed,
+        v_max,
+        kt_to_mph(v_max),
+        kt_to_mph(v_max) * 1.2,
+        selected_places
+    )
 
-        st.text_area("Warning Text", warning_text, height=400)
-    else:
-        st.warning("Polygon not large enough to generate warning text.")
+    st.text_area("Warning Text", warning_text, height=400)
+else:
+    st.warning("Polygon too small for warning text")
 
 # -----------------------------
 # CLICK UPDATE
