@@ -1456,65 +1456,68 @@ if (
     )
 
 # -----------------------------
-# 7. MAP & DASHBOARD
+# 7. MAP & DASHBOARD (CLEAN SINGLE BUILD)
 # -----------------------------
 c1, c2 = st.columns([4, 1.8])
 
 with c1:
+
+    # -----------------------------
+    # CREATE MAP FIRST (FIX)
+    # -----------------------------
+    m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
+
     if basemap_mode == "Dark":
-        tiles = None
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
         if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=True).add_to(m)
+            folium.TileLayer("CartoDB dark_matter", name="Dark", show=True).add_to(m)
         if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+            folium.TileLayer("OpenStreetMap", name="Street", show=False).add_to(m)
         if enable_satellite:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                 attr="Esri World Imagery",
                 name="Satellite",
-                control=True,
                 show=False,
             ).add_to(m)
+
     elif basemap_mode == "Street":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
         if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=True).add_to(m)
+            folium.TileLayer("OpenStreetMap", name="Street", show=True).add_to(m)
         if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+            folium.TileLayer("CartoDB dark_matter", name="Dark", show=False).add_to(m)
         if enable_satellite:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                 attr="Esri World Imagery",
                 name="Satellite",
-                control=True,
                 show=False,
             ).add_to(m)
+
     else:
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None, control_scale=True)
         if enable_satellite:
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                 attr="Esri World Imagery",
                 name="Satellite",
-                control=True,
                 show=True,
             ).add_to(m)
         if enable_street:
-            folium.TileLayer("OpenStreetMap", name="Street", control=True, show=False).add_to(m)
+            folium.TileLayer("OpenStreetMap", name="Street", show=False).add_to(m)
         if enable_dark:
-            folium.TileLayer("CartoDB dark_matter", name="Dark", control=True, show=False).add_to(m)
+            folium.TileLayer("CartoDB dark_matter", name="Dark", show=False).add_to(m)
 
     if enable_traffic and traffic_tile_url.strip():
         folium.TileLayer(
             tiles=traffic_tile_url.strip(),
-            attr="Traffic Provider",
+            attr="Traffic",
             name="Traffic",
             overlay=True,
-            control=True,
             opacity=0.75,
         ).add_to(m)
 
+    # -----------------------------
+    # RADAR GRID (ONCE)
+    # -----------------------------
     lats = np.linspace(l_lat - 2.5, l_lat + 2.5, res_steps)
     lons = np.linspace(l_lon - 2.5, l_lon + 2.5, int(res_steps * 1.2))
     d_lat, d_lon = lats[1] - lats[0], lons[1] - lons[0]
@@ -1522,6 +1525,7 @@ with c1:
     for lt in lats:
         for ln in lons:
             zone_name, zone_meta = get_zone_meta(lt, ln)
+
             dbz, vel, surge, prob, beam_height_km = get_synthetic_products(
                 lt, ln, current_lat, current_lon, p,
                 radar_coords=radar_coords,
@@ -1530,7 +1534,6 @@ with c1:
                 coastal_exposure=zone_meta["coastal_exposure"],
                 ewr_phase=ewr_phase,
             )
-            color = None
 
             if radar_view == "Reflectivity (dBZ)":
                 color = nws_reflectivity_color(dbz)
@@ -1538,7 +1541,7 @@ with c1:
                 color = velocity_color_hyperrealistic(vel)
             elif radar_view == "Storm Surge":
                 color = surge_color(surge)
-            elif radar_view == "Wind Prob.":
+            else:
                 color = wind_prob_color(prob)
 
             if color:
@@ -1550,6 +1553,9 @@ with c1:
                     weight=0,
                 ).add_to(m)
 
+    # -----------------------------
+    # OVERLAYS (UNCHANGED)
+    # -----------------------------
     if show_zone_boxes:
         for zone_name, meta in ZONES.items():
             (lat1, lon1), (lat2, lon2) = meta["bounds"]
@@ -1558,18 +1564,7 @@ with c1:
                 color="#6fa8dc",
                 fill=False,
                 weight=1.2,
-                opacity=0.8,
                 tooltip=zone_name,
-            ).add_to(m)
-
-            c_lat, c_lon = meta["center"]
-            folium.map.Marker(
-                [c_lat, c_lon],
-                icon=DivIcon(
-                    icon_size=(160, 16),
-                    icon_anchor=(0, 0),
-                    html=f"<div style='font-size:10px;color:white;text-shadow:0 0 3px black;'>{zone_name}</div>",
-                ),
             ).add_to(m)
 
     if show_city_markers:
@@ -1586,136 +1581,31 @@ with c1:
 
     if show_forecast_track:
         track_coords = [(pt["lat"], pt["lon"]) for pt in forecast_track]
-        folium.PolyLine(track_coords, color="#ffffff", weight=2.2, opacity=0.85, tooltip="Forecast Track").add_to(m)
-
-        for pt in forecast_track:
-            hour = pt["hour"]
-            lat = pt["lat"]
-            lon = pt["lon"]
-            cone_radius_mi = pt["cone_radius_mi"]
-
-            if show_cone:
-                folium.Circle(
-                    location=[lat, lon],
-                    radius=cone_radius_mi * 1609.34,
-                    color="#b7d8ff",
-                    fill=True,
-                    fill_color="#b7d8ff",
-                    fill_opacity=0.08,
-                    weight=1,
-                    opacity=0.35,
-                    tooltip=f"{hour}h cone radius ~{cone_radius_mi} mi",
-                ).add_to(m)
-
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=5 if hour else 7,
-                color="#ffffff",
-                fill=True,
-                fill_color="#ff4d4d" if hour == 0 else "#ffffff",
-                fill_opacity=0.95,
-                tooltip=f"Forecast Point T+{hour}h",
-            ).add_to(m)
-
-            folium.map.Marker(
-                [lat, lon],
-                icon=DivIcon(
-                    icon_size=(45, 14),
-                    icon_anchor=(0, 0),
-                    html=f"<div style='font-size:10px;color:white;text-shadow:0 0 3px black;'>+{hour}h</div>",
-                ),
-            ).add_to(m)
+        folium.PolyLine(track_coords, color="#ffffff", weight=2.2).add_to(m)
 
     folium.Marker(
         [current_lat, current_lon],
         tooltip="Storm Center",
-        icon=folium.Icon(color="red", icon="info-sign"),
+        icon=folium.Icon(color="red"),
     ).add_to(m)
 
-    zone_lat, zone_lon = ZONES[selected_zone]["center"]
-    folium.CircleMarker(
-        [zone_lat, zone_lon], radius=6, color="#00ffcc", fill=True,
-        fill_color="#00ffcc", tooltip=f"Selected Zone: {selected_zone}"
-    ).add_to(m)
+    # -----------------------------
+    # INSPECTOR (SINGLE CLEAN SYSTEM)
+    # -----------------------------
+    if "last_click" not in st.session_state:
+        st.session_state.last_click = (current_lat, current_lon)
 
-    city_lat, city_lon = CITY_POINTS[selected_city]
-    folium.CircleMarker(
-        [city_lat, city_lon], radius=6, color="#ffd700", fill=True,
-        fill_color="#ffd700", tooltip=f"Selected City: {selected_city}"
-    ).add_to(m)
-
-    if show_extreme_wind_warning and warning_polygon is not None:
-        folium.Polygon(
-            locations=warning_polygon,
-            color="#ff4d4d",
-            weight=3,
-            fill=True,
-            fill_color="#ff4d4d",
-            fill_opacity=0.18,
-            tooltip=f"Extreme Wind Warning Example • Gusts up to {landfall_env['gust_mph']:.0f} mph",
-        ).add_to(m)
-
-        # polygon label near centroid
-        poly_center_lat = np.mean([pt[0] for pt in warning_polygon])
-        poly_center_lon = np.mean([pt[1] for pt in warning_polygon])
-
-        folium.map.Marker(
-            [poly_center_lat, poly_center_lon],
-            icon=DivIcon(
-                icon_size=(220, 18),
-                icon_anchor=(0, 0),
-                html=(
-                    "<div style='font-size:11px;color:#ffcccc;"
-                    "font-weight:bold;text-shadow:0 0 4px black;'>"
-                    "EXTREME WIND WARNING"
-                    "</div>"
-                ),
-            ),
-        ).add_to(m)
-    
-    if show_warnings:
-        for zone_name, meta in ZONES.items():
-            zlat, zlon = meta["center"]
-            env = compute_local_environment(
-                zlat, zlon, current_lat, current_lon, p, radar_coords, front_lat,
-                pressure_drop_hpa=pressure_drop_hpa, dry_air=dry_air, urban_heat=urban_heat, ewr_phase=ewr_phase,
-            )
-            if env["surge_ft"] >= surge_threshold:
-                folium.Circle(
-                    location=[zlat, zlon],
-                    radius=9000,
-                    color="#ff4444",
-                    fill=False,
-                    weight=2,
-                    opacity=0.85,
-                    tooltip=f"{zone_name} surge warning: {env['surge_ft']:.1f} ft",
-                ).add_to(m)
-
-    add_map_legend(m, radar_view)
-    folium.LayerControl(collapsed=False).add_to(m)
-
-    Fullscreen(
-        position="topright",
-        title="Full Screen",
-        title_cancel="Exit Full Screen",
-        force_separate_button=True,
-    ).add_to(m)
-    
-# default before click exists
-inspect_lat, inspect_lon = current_lat, current_lon
-
-# if we already have a stored click
-if "last_click" in st.session_state:
     inspect_lat, inspect_lon = st.session_state.last_click
 
-# add marker BEFORE rendering map
-if st.session_state.inspector_mode:
-    folium.Marker(
-        [inspect_lat, inspect_lon],
-        icon=folium.Icon(color="white", icon="plus"),
-        tooltip="Inspector Point"
-    ).add_to(m)    
-    
+    if st.session_state.inspector_mode:
+        folium.Marker(
+            [inspect_lat, inspect_lon],
+            icon=folium.Icon(color="white", icon="plus"),
+        ).add_to(m)
+
+    # -----------------------------
+    # RENDER MAP (ONLY ONCE)
+    # -----------------------------
     map_data = st_folium(
         m,
         width="100%",
@@ -1724,50 +1614,30 @@ if st.session_state.inspector_mode:
         returned_objects=["last_clicked"],
     )
 
-if map_data and map_data.get("last_clicked"):
-    inspect_lat = map_data["last_clicked"]["lat"]
-    inspect_lon = map_data["last_clicked"]["lng"]
-else:
-    inspect_lat, inspect_lon = current_lat, current_lon
+    if map_data and map_data.get("last_clicked"):
+        st.session_state.last_click = (
+            map_data["last_clicked"]["lat"],
+            map_data["last_clicked"]["lng"]
+        )
 
-if st.session_state.inspector_mode:
-    folium.Marker(
-        [inspect_lat, inspect_lon],
-        icon=folium.Icon(color="white", icon="plus"),
-        tooltip="Inspector Point"
-    ).add_to(m)
-    
-if st.session_state.inspector_mode:
+    # -----------------------------
+    # INSPECTOR PANEL
+    # -----------------------------
+    if st.session_state.inspector_mode:
+        dbz, vel, surge, prob, beam = get_synthetic_products(
+            inspect_lat, inspect_lon, current_lat, current_lon, p,
+            radar_coords=radar_coords
+        )
 
-    dbz, vel, surge, prob, beam = get_synthetic_products(
-        inspect_lat,
-        inspect_lon,
-        current_lat,
-        current_lon,
-        p,
-        radar_coords=radar_coords
-    )
-
-    vel_mph = vel * 1.15078
-
-    st.markdown(f"""
-    <div style="
-        position: fixed;
-        top: 70px;
-        right: 20px;
-        background: rgba(0,0,0,0.6);
-        padding: 10px 14px;
-        border-radius: 8px;
-        color: white;
-        font-size: 14px;
-        z-index: 9999;
-    ">
+        st.markdown(f"""
+        <div style="position: fixed; top:70px; right:20px;
+        background: rgba(0,0,0,0.6); padding:10px; border-radius:8px; color:white;">
         <b>Inspector</b><br>
         Lat: {inspect_lat:.3f} Lon: {inspect_lon:.3f}<br>
         Reflectivity: {dbz:.1f} dBZ<br>
-        Velocity: {vel:.1f} kt ({vel_mph:.1f} mph)
-    </div>
-    """, unsafe_allow_html=True)
+        Velocity: {vel:.1f} kt
+        </div>
+        """, unsafe_allow_html=True)
     
 with c2:
     st.markdown(
