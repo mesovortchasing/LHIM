@@ -1389,6 +1389,14 @@ dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
 current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
 
+# -----------------------------
+# CLICK / INSPECTOR STATE (MOVE THIS UP)
+# -----------------------------
+if "last_click" not in st.session_state:
+    st.session_state.last_click = (current_lat, current_lon)
+
+inspect_lat, inspect_lon = st.session_state.last_click
+
 p = [
     v_max, r_max, f_speed, f_dir,
     shear_mag, shear_dir, rh, outflow,
