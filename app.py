@@ -1681,22 +1681,22 @@ st.subheader("⚠️ Warning Panel")
 
 if show_warning_text_panel and warnings_active:
     if poly and len(poly) >= 5:
-    selected_places = impacted_counties[:6]
+        selected_places = impacted_counties[:6]
 
-    warning_text = generate_extreme_wind_warning_text(
-        poly,
-        l_lat, l_lon,
-        current_lat, current_lon,
-        f_dir, f_speed,
-        v_max,
-        kt_to_mph(v_max),
-        kt_to_mph(v_max) * 1.2,
-        selected_places
-    )
+        warning_text = generate_extreme_wind_warning_text(
+            poly,
+            l_lat, l_lon,
+            current_lat, current_lon,
+            f_dir, f_speed,
+            v_max,
+            kt_to_mph(v_max),
+            kt_to_mph(v_max) * 1.2,
+            selected_places
+        )
 
-    st.text_area("Warning Text", warning_text, height=400)
-else:
-    st.warning("Polygon too small for warning text")
+        st.text_area("Warning Text", warning_text, height=400)
+    else:
+        st.warning("Polygon too small for warning text")
 
 # -----------------------------
 # CLICK UPDATE
