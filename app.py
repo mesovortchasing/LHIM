@@ -1173,53 +1173,55 @@ geolocator = Nominatim(user_agent="lhim_mobile_county_v40_hyperrealistic")
 # -----------------------------
 st.set_page_config(layout="wide", page_title="LHIM Mobile County v4.0 | Hyperrealistic Mode")
 
-# --- SESSION STATE SAFETY ---
-if "inspector_mode" not in st.session_state:
-    st.session_state.inspector_mode = False
-if "active_radar" not in st.session_state:
-    st.session_state.active_radar = list(RADAR_SITES.keys())[0]
-if "is_playing" not in st.session_state:
-    st.session_state.is_playing = False
-if "loop_idx" not in st.session_state:
-    st.session_state.loop_idx = 0
-
-# --- SIDEBAR ---
+# -----------------------------
+# SIDEBAR
+# -----------------------------
 with st.sidebar:
     st.title("🛡️ LHIM Mobile County v4.0")
+
     radar_view = st.radio(
         "Display Mode",
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
 
-# --- MAIN LAYOUT ---
+    # --- Radar Controls (ALWAYS AVAILABLE) ---
+    st.subheader("📡 Radar Controls")
+    st.session_state.active_radar = st.selectbox(
+        "Radar Site",
+        list(RADAR_SITES.keys()),
+        index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
+    )
+
+    run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
+    st.session_state.is_playing = run_loop
+
+    current_time_offset = st.slider(
+        "Time Offset (Hours)",
+        -12, 12,
+        st.session_state.loop_idx
+    )
+    st.session_state.loop_idx = current_time_offset
+
+    # --- Storm Structure (ALWAYS AVAILABLE) ---
+    st.subheader("🌀 Storm Structure")
+    v_max = st.slider("Intensity (kts)", 40, 160, 115)
+    r_max = st.slider("RMW (miles)", 10, 60, 25)
+    f_speed = st.slider("Forward Speed", 2, 40, 12)
+    f_dir = st.slider("Heading", 0, 360, 330)
+    l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
+    l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
+    res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
+
+# -----------------------------
+# MAIN LAYOUT
+# -----------------------------
 col1, col2 = st.columns([0.9, 0.1])
 
-# ✅ CORE CONTROLS (ALWAYS DEFINED)
-st.subheader("📡 Radar Controls")
-st.session_state.active_radar = st.selectbox(
-    "Radar Site",
-    list(RADAR_SITES.keys()),
-    index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
-)
-
-run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
-st.session_state.is_playing = run_loop
-
-current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
-st.session_state.loop_idx = current_time_offset
-
-
-st.subheader("🌀 Storm Structure")
-v_max = st.slider("Intensity (kts)", 40, 160, 115)
-r_max = st.slider("RMW (miles)", 10, 60, 25)
-f_speed = st.slider("Forward Speed", 2, 40, 12)
-f_dir = st.slider("Heading", 0, 360, 330)
-l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
-l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
-res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
-
-# --- BUTTON COLUMN ---
+# -----------------------------
+# RIGHT CONTROL PANEL
+# -----------------------------
 with col2:
+
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
 
@@ -1229,14 +1231,17 @@ with col2:
         enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
         enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
         enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
+
         traffic_tile_url = st.text_input(
             "Traffic Tile URL (optional / provider required)",
-            value="",
-            help="Paste a valid traffic tile endpoint if you have one."
+            value=""
         )
 
-# --- INSPECTOR MODE UI ---
+# -----------------------------
+# INSPECTOR MODE (OUTSIDE col2)
+# -----------------------------
 if st.session_state.inspector_mode:
+
     st.markdown("""
     <div style="
         position: fixed;
@@ -1264,7 +1269,11 @@ if st.session_state.inspector_mode:
         show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
 
     with st.expander("🌡️ Environmental Layers", expanded=True):
-        season_month = st.selectbox("Seasonal SST Month", ["June", "July", "August", "September", "October", "November"], index=3)
+        season_month = st.selectbox(
+            "Seasonal SST Month",
+            ["June", "July", "August", "September", "October", "November"],
+            index=3
+        )
         sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
         front_lat = st.slider("Cold Front Latitude", 30.0, 32.5, 31.8)
         shear_mag = st.slider("Deep Layer Shear (kts)", 0, 80, 15)
@@ -1278,11 +1287,24 @@ if st.session_state.inspector_mode:
         ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
 
     st.subheader("📍 Mobile County Selector")
-    selected_zone = st.selectbox("Zone", list(ZONES.keys()), index=list(ZONES.keys()).index("Downtown-Mobile"))
-    selected_city = st.selectbox("City / Place", list(CITY_POINTS.keys()), index=list(CITY_POINTS.keys()).index("Mobile"))
-    use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
+    selected_zone = st.selectbox(
+        "Zone",
+        list(ZONES.keys()),
+        index=list(ZONES.keys()).index("Downtown-Mobile")
+    )
+    selected_city = st.selectbox(
+        "City / Place",
+        list(CITY_POINTS.keys()),
+        index=list(CITY_POINTS.keys()).index("Mobile")
+    )
+    use_city_selection = st.checkbox(
+        "Lock analysis panel to selected city/place",
+        value=False
+    )
 
-# --- CORE CALCULATIONS ---
+# -----------------------------
+# CALCULATIONS (SAFE NOW)
+# -----------------------------
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
 current_lon = l_lon + (dist_moved * np.sin(np.radians(f_dir)))
@@ -1301,6 +1323,7 @@ p = [
 ]
 
 radar_coords = RADAR_SITES[st.session_state.active_radar]
+
 mslp = calculate_mslp(v_max, pressure_drop_hpa)
 pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
 storm_class = saffir_simpson_category(v_max)
@@ -1336,7 +1359,13 @@ if (
         landfall_zone_meta["terrain_friction"],
         landfall_zone_meta["urban_factor"],
     )
-    warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
+
+    warning_places = pick_impacted_places(
+        warning_polygon,
+        CITY_POINTS,
+        max_places=6
+    )
+
     example_warning_text = generate_extreme_wind_warning_text(
         warning_polygon,
         l_lat,
