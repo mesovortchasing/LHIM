@@ -822,32 +822,30 @@ def compute_local_environment(
     friction_recovery = 1 + ((1 - zone_meta["terrain_friction"]) * 0.15)
     w_kts = w_kts * coastal_boost * friction_recovery
 
-# -----------------------------
-# URBAN / INLAND DECAY (NEW)
-# -----------------------------
+    # -----------------------------
+    # URBAN / INLAND DECAY (NEW)
+    # -----------------------------
     urban = zone_meta["urban_factor"]  # 0 → rural, 1 → dense city
 
-# stronger decay with distance + urban density
-    inland_decay = np.clip((r / 80), 0, 1.5)   # ramps up inland
+    # stronger decay with distance + urban density
+    inland_decay = np.clip((r / 80), 0, 1.5)
     urban_penalty = 1 - (urban * 0.35 * inland_decay)
 
-# apply to sustained wind
-     w_kts = w_kts * urban_penalty      
+    # apply to sustained wind
+    w_kts = w_kts * urban_penalty
 
-# -----------------------------
-# REALISTIC GUST LOGIC (IMPROVED)
-# -----------------------------
-if r < r_max:
-    gust_kts = w_kts * 1.20   # eyewall still strong
-else:
-    # inland: gusts weaken relative to sustained
-    inland_factor = np.clip(1 - (r / 120), 0.7, 1.0)
-    urban_factor = 1 - (zone_meta["urban_factor"] * 0.25)
+    # -----------------------------
+    # REALISTIC GUST LOGIC (IMPROVED)
+    # -----------------------------
+    if r < r_max:
+        gust_kts = w_kts * 1.20
+    else:
+        inland_factor = np.clip(1 - (r / 120), 0.7, 1.0)
+        urban_factor = 1 - (zone_meta["urban_factor"] * 0.25)
+        gust_kts = w_kts * inland_factor * urban_factor
 
-    gust_kts = w_kts * inland_factor * urban_factor
-
-# caps
-gust_kts = min(gust_kts, 155 if r < 20 else 130)
+    # caps
+    gust_kts = min(gust_kts, 155 if r < 20 else 130)
 
     # -----------------------------
     # TEMPERATURE / DEWPOINT
