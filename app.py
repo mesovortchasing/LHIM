@@ -792,7 +792,7 @@ def get_zone_meta(lat, lon):
     return zone_name, ZONES[zone_name]
 
 
-def compute_local_environment(
+ddef compute_local_environment(
     lat, lon, s_lat, s_lon, p, radar_coords, front_lat,
     pressure_drop_hpa=32, dry_air=0, urban_heat=0, ewr_phase=0.0
 ):
@@ -815,36 +815,36 @@ def compute_local_environment(
 
     v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
 
+    # -----------------------------
+    # WIND ADJUSTMENTS
+    # -----------------------------
     coastal_boost = 1 + (zone_meta["coastal_exposure"] * 0.08)
     friction_recovery = 1 + ((1 - zone_meta["terrain_friction"]) * 0.15)
     w_kts = w_kts * coastal_boost * friction_recovery
 
     # -----------------------------
-# REALISTIC GUST LOGIC
-# -----------------------------
+    # REALISTIC GUST LOGIC (FIXED)
+    # -----------------------------
+    if r < r_max:
+        gust_factor = 1.25
+    else:
+        gust_factor = 1.15
 
-# Base gust factor (lower inland)
-if radius_mi < r_max:
-    gust_factor = 1.25   # eyewall
-else:
-    gust_factor = 1.15   # outer bands
+    friction = 0.85 - (r / 300)
+    friction = max(0.6, min(friction, 0.9))
 
-# Terrain friction (kills inland winds)
-friction = 0.85 - (radius_mi / 300)  # increases decay with distance
-friction = max(0.6, min(friction, 0.9))
+    gust_kts = w_kts * gust_factor * friction
 
-# Apply
-gust_kts = wind_kts * gust_factor * friction
+    if r > 20:
+        gust_kts = min(gust_kts, 130)
+    else:
+        gust_kts = min(gust_kts, 155)
 
-# HARD CAPS (this is key)
-if radius_mi > 20:  # inland
-    gust_kts = min(gust_kts, 130)   # ~150 mph max inland
-else:  # near core
-    gust_kts = min(gust_kts, 155)   # extreme but realistic
-
-gust_mph = gust_kts * 1.15078
-
+    # -----------------------------
+    # TEMPERATURE / DEWPOINT
+    # -----------------------------
     t_base = 84 if sst_mult >= 1.15 else 81
+
     temp_f = (
         t_base
         - (r * 0.07)
@@ -854,30 +854,60 @@ gust_mph = gust_kts * 1.15078
         + (zone_meta["coastal_exposure"] * 1.2)
         - (dry_air * 0.15)
     )
+
     dewp_f = temp_f - max(1.5, (100 - rh + dry_air) * 0.16)
     dewp_f = min(dewp_f, temp_f)
 
+    # -----------------------------
+    # VISIBILITY
+    # -----------------------------
     rain_factor = dbz / 75
     wind_reduction = min(1.2, w_kts / 120)
+
     vis_mi = 10 - (rain_factor * 7.2) - (wind_reduction * 1.4)
     if zone_meta["coastal_exposure"] > 0.65:
         vis_mi -= 0.4
+
     vis_mi = float(np.clip(vis_mi, 0.2, 10.0))
 
+    # -----------------------------
+    # WIND / RAIN DIRECTION
+    # -----------------------------
     dx = (lon - s_lon) * 53
     dy = (lat - s_lat) * 69
+
     storm_bearing_from_center = np.degrees(np.arctan2(dx, dy)) % 360
     inflow_dir = (storm_bearing_from_center + 180 - 20) % 360
-    rain_dir = normalize_angle(inflow_dir + (shear_mag * 0.15) - ((1 - symmetry) * 25))
 
-    surge_ft = max(0.0, surge_raw + zone_meta["surge_bias"] + (zone_meta["coastal_exposure"] * 0.6))
+    rain_dir = normalize_angle(
+        inflow_dir + (shear_mag * 0.15) - ((1 - symmetry) * 25)
+    )
 
-    right_front_bonus = max(0, np.cos(np.radians((storm_bearing_from_center - f_dir) - 45)))
+    # -----------------------------
+    # SURGE
+    # -----------------------------
+    surge_ft = max(
+        0.0,
+        surge_raw + zone_meta["surge_bias"] + (zone_meta["coastal_exposure"] * 0.6)
+    )
+
+    # -----------------------------
+    # TORNADO RISK
+    # -----------------------------
+    right_front_bonus = max(
+        0,
+        np.cos(np.radians((storm_bearing_from_center - f_dir) - 45))
+    )
+
     shear_term = np.clip((shear_mag - 10) / 40, 0, 1)
     moisture_term = np.clip((rh - 65) / 30, 0, 1)
-    friction_term = np.clip((1 - zone_meta["terrain_friction"]) * 3.2 + zone_meta["urban_factor"] * 0.6, 0, 1)
+    friction_term = np.clip(
+        (1 - zone_meta["terrain_friction"]) * 3.2 + zone_meta["urban_factor"] * 0.6,
+        0, 1
+    )
     band_term = np.clip(dbz / 55, 0, 1)
     wind_term = np.clip(w_kts / 110, 0, 1)
+
     tornado_risk = 100 * (
         0.24 * shear_term +
         0.18 * moisture_term +
@@ -886,6 +916,7 @@ gust_mph = gust_kts * 1.15078
         0.14 * band_term +
         0.12 * wind_term
     )
+
     tornado_risk = float(np.clip(tornado_risk, 0, 100))
 
     if tornado_risk >= 75:
@@ -897,13 +928,16 @@ gust_mph = gust_kts * 1.15078
     else:
         tornado_label = "Low"
 
+    # -----------------------------
+    # FINAL CONVERSIONS
+    # -----------------------------
     wind_mph = kt_to_mph(w_kts)
-    gust_mph = kt_to_mph(gust)
+    gust_mph = kt_to_mph(gust_kts)
 
     return {
         "zone": zone_name,
         "wind_kts": float(w_kts),
-        "gust_kts": float(gust),
+        "gust_kts": float(gust_kts),
         "wind_mph": float(wind_mph),
         "gust_mph": float(gust_mph),
         "temp_f": float(temp_f),
