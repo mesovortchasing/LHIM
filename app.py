@@ -1043,6 +1043,34 @@ def offset_latlon(lat, lon, miles, bearing_deg):
     dlon = (miles * np.sin(bearing)) / (53.0 * np.cos(np.radians(max(1, abs(lat)))))
     return lat + dlat, lon + dlon
 
+def build_hurricane_warning_polygon(center_lat, center_lon, r_max):
+    radius = max(40, r_max * 3.5)
+
+    coords = []
+    for angle in np.linspace(0, 360, 36):
+        lat = center_lat + (radius / 69.0) * np.cos(np.radians(angle))
+        lon = center_lon + (radius / 53.0) * np.sin(np.radians(angle))
+        coords.append([lat, lon])
+
+    return coords
+
+def build_surge_polygon(center_lat, center_lon, heading_deg, r_max):
+    length = max(60, r_max * 4)
+    width = max(20, r_max * 2)
+
+    front_lat, front_lon = offset_latlon(center_lat, center_lon, length, heading_deg)
+    left_lat, left_lon = offset_latlon(front_lat, front_lon, width, heading_deg - 90)
+    right_lat, right_lon = offset_latlon(front_lat, front_lon, width, heading_deg + 90)
+
+    rear_lat, rear_lon = offset_latlon(center_lat, center_lon, width, heading_deg + 180)
+
+    return [
+        [rear_lat, rear_lon],
+        [left_lat, left_lon],
+        [front_lat, front_lon],
+        [right_lat, right_lon],
+    ]
+
 def build_extreme_wind_warning_polygon(
     center_lat,
     center_lon,
@@ -1316,6 +1344,14 @@ with st.sidebar:
     res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
     with st.expander("⚠️ Warning Settings"):
+        show_hurricane_warning = st.checkbox("Show Hurricane Warning", value=True)
+        show_surge_warning = st.checkbox("Show Storm Surge Warning", value=True)
+
+        hurricane_opacity = st.slider("Hurricane Warning Opacity", 0.1, 1.0, 0.4)
+        surge_opacity = st.slider("Storm Surge Warning Opacity", 0.1, 1.0, 0.4)
+        extreme_opacity = st.slider("Extreme Wind Warning Opacity", 0.1, 1.0, 0.5)
+
+        warning_distance_trigger = st.slider("Trigger Distance to Land (mi)", 10, 150, 60)  
         show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
         show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
         extreme_wind_threshold_mph = st.slider("Extreme Wind Warning Trigger (mph)", 80, 140, 115)
@@ -1554,6 +1590,50 @@ if show_cone and forecast_track:
             icon=folium.Icon(color="white", icon="plus"),
         ).add_to(m)
 
+def distance_miles(lat1, lon1, lat2, lon2):
+    return np.hypot((lat1 - lat2) * 69, (lon1 - lon2) * 53)
+
+dist_to_landfall = distance_miles(current_lat, current_lon, l_lat, l_lon)
+
+warnings_active = dist_to_landfall <= warning_distance_trigger
+    
+if show_extreme_wind_warning and warnings_active and gust_mph >= extreme_wind_threshold_mph:
+    poly = build_extreme_wind_warning_polygon(
+        current_lat, current_lon, f_dir, f_speed,
+        r_max, v_max, symmetry, shear_mag,
+        zone_meta["terrain_friction"], urban_heat
+    )
+
+    folium.Polygon(
+        locations=poly,
+        color="red",
+        fill=True,
+        fill_opacity=extreme_opacity,
+        weight=2
+    ).add_to(m)
+
+    if show_hurricane_warning and warnings_active:
+    poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
+
+    folium.Polygon(
+        locations=poly,
+        color="orange",
+        fill=True,
+        fill_opacity=hurricane_opacity,
+        weight=2
+    ).add_to(m)
+
+    if show_surge_warning and warnings_active:
+    poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
+
+    folium.Polygon(
+        locations=poly,
+        color="purple",
+        fill=True,
+        fill_opacity=surge_opacity,
+        weight=2
+    ).add_to(m)
+    
 # -----------------------------
     # RENDER MAP (STABLE KEY)
     # -----------------------------
@@ -1564,6 +1644,43 @@ if show_cone and forecast_track:
     key="main_map",
     returned_objects=["last_clicked"]
 )
+    with c2:
+    st.subheader("⚠️ Warning Panel")
+
+    if show_warning_text_panel and warnings_active:
+        active_polygon = None
+
+        if show_extreme_wind_warning:
+            active_polygon = build_extreme_wind_warning_polygon(
+                current_lat, current_lon, f_dir, f_speed,
+                r_max, v_max, symmetry, shear_mag,
+                terrain_friction=0.5,  # or use your zone_meta if available
+                urban_factor=urban_heat
+            )
+
+        elif show_hurricane_warning:
+            active_polygon = build_hurricane_warning_polygon(
+                current_lat, current_lon, r_max
+            )
+
+        elif show_surge_warning:
+            active_polygon = build_surge_polygon(
+                current_lat, current_lon, f_dir, r_max
+            )
+
+        if active_polygon:
+            selected_places = pick_impacted_places(active_polygon, CITY_POINTS)
+
+            warning_text = generate_extreme_wind_warning_text(
+                active_polygon,
+                l_lat, l_lon,
+                current_lat, current_lon,
+                f_dir, f_speed,
+                v_max, wind_mph, gust_mph,
+                selected_places
+            )
+
+            st.text_area("Warning Text", warning_text, height=400)
 
     if map_data and map_data.get("last_clicked"):
         st.session_state.last_click = (
