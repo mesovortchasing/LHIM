@@ -1199,9 +1199,7 @@ geolocator = Nominatim(user_agent="lhim_mobile_county_v40_hyperrealistic")
 # -----------------------------
 st.set_page_config(layout="wide", page_title="LHIM Mobile County v4.0 | Hyperrealistic Mode")
 
-# -----------------------------
-# SIDEBAR
-# -----------------------------
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("🛡️ LHIM Mobile County v4.0")
 
@@ -1210,7 +1208,7 @@ with st.sidebar:
         ["Reflectivity (dBZ)", "Velocity (kts)", "Storm Surge", "Wind Prob."]
     )
 
-    # --- Radar Controls (ALWAYS AVAILABLE) ---
+    # RADAR CONTROLS
     st.subheader("📡 Radar Controls")
     st.session_state.active_radar = st.selectbox(
         "Radar Site",
@@ -1221,14 +1219,10 @@ with st.sidebar:
     run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
     st.session_state.is_playing = run_loop
 
-    current_time_offset = st.slider(
-        "Time Offset (Hours)",
-        -12, 12,
-        st.session_state.loop_idx
-    )
+    current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
     st.session_state.loop_idx = current_time_offset
 
-    # --- Storm Structure (ALWAYS AVAILABLE) ---
+    # STORM STRUCTURE
     st.subheader("🌀 Storm Structure")
     v_max = st.slider("Intensity (kts)", 40, 160, 115)
     r_max = st.slider("RMW (miles)", 10, 60, 25)
@@ -1238,16 +1232,44 @@ with st.sidebar:
     l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
     res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
-# -----------------------------
-# MAIN LAYOUT
-# -----------------------------
+    # WARNINGS
+    with st.expander("⚠️ Warning Settings", expanded=False):
+        show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
+        show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
+        extreme_wind_threshold_mph = st.slider("Extreme Wind Warning Trigger (mph)", 80, 140, 115)
+        show_warning_text_panel = st.checkbox("Show Example Warning Text", value=True)
+        surge_threshold = st.slider("Warning Trigger (ft)", 3, 12, 6)
+        show_zone_boxes = st.checkbox("Show Zone Boxes", value=True)
+        show_city_markers = st.checkbox("Show City Markers", value=True)
+        show_forecast_track = st.checkbox("Show Forecast Track", value=True)
+        show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
+
+    # ENVIRONMENT
+    with st.expander("🌡️ Environmental Layers", expanded=True):
+        season_month = st.selectbox("Seasonal SST Month", ["June", "July", "August", "September", "October", "November"], index=3)
+        sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
+        front_lat = st.slider("Cold Front Latitude", 30.0, 32.5, 31.8)
+        shear_mag = st.slider("Deep Layer Shear (kts)", 0, 80, 15)
+        shear_dir = st.slider("Shear Vector Dir", 0, 360, 240)
+        rh = st.slider("Fluid RH (%)", 30, 100, 88)
+        outflow = st.slider("Upper Outflow", 0.2, 1.5, 0.8, 0.05)
+        symmetry = st.slider("Core Symmetry", 0.35, 1.00, 0.85, 0.01)
+        pressure_drop_hpa = st.slider("Pressure Fall Signal (hPa)", 0, 60, 32)
+        dry_air = st.slider("Dry Air Entrapment", 0, 40, 8)
+        urban_heat = st.slider("Urban Heat Bias", 0.0, 4.0, 1.2, 0.1)
+        ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
+
+    # LOCATION
+    st.subheader("📍 Mobile County Selector")
+    selected_zone = st.selectbox("Zone", list(ZONES.keys()), index=list(ZONES.keys()).index("Downtown-Mobile"))
+    selected_city = st.selectbox("City / Place", list(CITY_POINTS.keys()), index=list(CITY_POINTS.keys()).index("Mobile"))
+    use_city_selection = st.checkbox("Lock analysis panel to selected city/place", value=False)
+
+
+# --- MAIN LAYOUT ---
 col1, col2 = st.columns([0.9, 0.1])
 
-# -----------------------------
-# RIGHT CONTROL PANEL
-# -----------------------------
 with col2:
-
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
 
@@ -1257,17 +1279,13 @@ with col2:
         enable_street = st.checkbox("Enable Street Layer Toggle", value=True)
         enable_dark = st.checkbox("Enable Dark Layer Toggle", value=True)
         enable_traffic = st.checkbox("Enable Traffic Overlay", value=False)
-
         traffic_tile_url = st.text_input(
             "Traffic Tile URL (optional / provider required)",
             value=""
         )
 
-# -----------------------------
-# INSPECTOR MODE (OUTSIDE col2)
-# -----------------------------
+# --- INSPECTOR OVERLAY (OUTSIDE EVERYTHING IMPORTANT) ---
 if st.session_state.inspector_mode:
-
     st.markdown("""
     <div style="
         position: fixed;
@@ -1283,53 +1301,9 @@ if st.session_state.inspector_mode:
     </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("⚠️ Warning Settings", expanded=False):
-        show_warnings = st.checkbox("Overlay Surge Warnings", value=True)
-        show_extreme_wind_warning = st.checkbox("Show Extreme Wind Warning Polygon", value=True)
-        extreme_wind_threshold_mph = st.slider("Extreme Wind Warning Trigger (mph)", 80, 140, 115)
-        show_warning_text_panel = st.checkbox("Show Example Warning Text", value=True)
-        surge_threshold = st.slider("Warning Trigger (ft)", 3, 12, 6)
-        show_zone_boxes = st.checkbox("Show Zone Boxes", value=True)
-        show_city_markers = st.checkbox("Show City Markers", value=True)
-        show_forecast_track = st.checkbox("Show Forecast Track", value=True)
-        show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
-
-    with st.expander("🌡️ Environmental Layers", expanded=True):
-        season_month = st.selectbox(
-            "Seasonal SST Month",
-            ["June", "July", "August", "September", "October", "November"],
-            index=3
-        )
-        sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
-        front_lat = st.slider("Cold Front Latitude", 30.0, 32.5, 31.8)
-        shear_mag = st.slider("Deep Layer Shear (kts)", 0, 80, 15)
-        shear_dir = st.slider("Shear Vector Dir", 0, 360, 240)
-        rh = st.slider("Fluid RH (%)", 30, 100, 88)
-        outflow = st.slider("Upper Outflow", 0.2, 1.5, 0.8, 0.05)
-        symmetry = st.slider("Core Symmetry", 0.35, 1.00, 0.85, 0.01)
-        pressure_drop_hpa = st.slider("Pressure Fall Signal (hPa)", 0, 60, 32)
-        dry_air = st.slider("Dry Air Entrapment", 0, 40, 8)
-        urban_heat = st.slider("Urban Heat Bias", 0.0, 4.0, 1.2, 0.1)
-        ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
-
-    st.subheader("📍 Mobile County Selector")
-    selected_zone = st.selectbox(
-        "Zone",
-        list(ZONES.keys()),
-        index=list(ZONES.keys()).index("Downtown-Mobile")
-    )
-    selected_city = st.selectbox(
-        "City / Place",
-        list(CITY_POINTS.keys()),
-        index=list(CITY_POINTS.keys()).index("Mobile")
-    )
-    use_city_selection = st.checkbox(
-        "Lock analysis panel to selected city/place",
-        value=False
-    )
 
 # -----------------------------
-# CALCULATIONS (SAFE NOW)
+# STORM CALCULATIONS (GLOBAL SCOPE)
 # -----------------------------
 dist_moved = (f_speed * current_time_offset) / 69.0
 current_lat = l_lat + (dist_moved * np.cos(np.radians(f_dir)))
@@ -1386,11 +1360,7 @@ if (
         landfall_zone_meta["urban_factor"],
     )
 
-    warning_places = pick_impacted_places(
-        warning_polygon,
-        CITY_POINTS,
-        max_places=6
-    )
+    warning_places = pick_impacted_places(warning_polygon, CITY_POINTS, max_places=6)
 
     example_warning_text = generate_extreme_wind_warning_text(
         warning_polygon,
