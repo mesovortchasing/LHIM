@@ -192,10 +192,7 @@ def get_synthetic_products(
     cone_of_silence=True,
 ):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
-    w, wd, r = calculate_full_physics(
-    arg1,
-    arg2,
-)
+    w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, v_max, r_max, motion_dir, motion_speed, shear, terrain, inland_decay)
 
         # --- NEW: approximate central pressure safely ---
     base_mslp = calculate_mslp(v_max, 0)
