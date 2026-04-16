@@ -7,7 +7,7 @@ from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 import time
 from geopy.geocoders import Nominatim
-
+st.set_page_config(layout="wide")
 # =========================================================
 # LHIM MOBILE COUNTY v4.0 HYPERREALISTIC
 # Built as a drop-in extension of the user's v3.0 sandbox.
@@ -1348,7 +1348,7 @@ if (
 # -----------------------------
 # MAP + PANEL (STABLE FINAL)
 # -----------------------------
-c1, c2 = st.columns([4, 1.8])
+c1, c2 = st.columns([4, 1])
 
 with c1:
     m = folium.Map(
@@ -1467,7 +1467,7 @@ with c1:
     # -----------------------------
     map_data = st_folium(
         m,
-        height=770,
+        height=850,
         key="main_map",
         returned_objects=["last_clicked"]
     )
