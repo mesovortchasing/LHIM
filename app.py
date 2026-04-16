@@ -166,14 +166,14 @@ surface_wind = max(0, ((v_sym * shear_effect) + v_forward) * terrain_friction)
 gradient_boost = (v_max / max(r_max, 1)) * 0.08
 surface_wind *= (1.0 + gradient_boost)
 
-    # Inland decay / land interaction refinement.
-    if inland_decay:
-        if lat > 30.15:
-            inland_miles = (lat - 30.15) * 69
-            land_decay = max(0.72, np.exp(-inland_miles / 260.0))
-            surface_wind *= land_decay
+# Inland decay / land interaction refinement.
+if inland_decay:
+    if lat > 30.15:
+        inland_miles = (lat - 30.15) * 69
+        land_decay = max(0.72, np.exp(-inland_miles / 260.0))
+        surface_wind *= land_decay
 
-    return surface_wind, np.degrees(wind_angle_rad), r
+return surface_wind, np.degrees(wind_angle_rad), r
 
 
 def get_synthetic_products(
