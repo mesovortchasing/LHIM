@@ -225,11 +225,11 @@ shield = 42 * moisture_flux * np.exp(-r_adj / (r_max * 5.0))
 bands = max(0, np.sin(r / (r_max * 0.8) - angle * 3.0) * 35 * np.exp(-r / 200))
 front_rain = 30 * np.exp(-abs(lat - front_lat) * 2) if (front_lat and lat > front_lat - 0.5) else 0
 
-# Eyewall replacement cycle structure.
-if ewr_phase > 0:
-    outer_ring = 0.72 * 65 * np.exp(-((r - (r_max * 1.8)) ** 2) / (r_max * 0.58) ** 2)
-    eyewall = eyewall * (1 - min(1.0, ewr_phase))
-    bands = max(bands, outer_ring)
+    # Eyewall replacement cycle structure.
+    if ewr_phase > 0:
+        outer_ring = 0.72 * 65 * np.exp(-((r - (r_max * 1.8)) ** 2) / (r_max * 0.58) ** 2)
+        eyewall = eyewall * (1 - min(1.0, ewr_phase))
+        bands = max(bands, outer_ring)
 
     dbz = max(eyewall, shield, bands, front_rain) * symmetry
     if r < r_max * (0.15 if is_major else 0.4):
@@ -266,9 +266,8 @@ if ewr_phase > 0:
         surge = (w ** 1.9 / 1700) * (1.8 if lon > s_lon else -0.5) * dist_mult * coastal_exposure
 
     prob = 90 if w >= 96 else 60 if w >= 64 else 30 if w >= 34 else 0
+
     return min(78, dbz), aliased_v, surge, prob, beam_height_km
-
-
 # -----------------------------
 # 2. MOBILE COUNTY ZONES & CITIES
 # -----------------------------
