@@ -212,11 +212,6 @@ gx = (p_neighbors[2] - p_neighbors[3]) * 0.5
 gy = (p_neighbors[0] - p_neighbors[1]) * 0.5
 
 u, v = compute_wind_vector(gx, gy)
-        lat, lon, s_lat, s_lon, p,
-        micro_scale=micro_scale,
-        front_lat=front_lat,
-        terrain_friction=terrain_friction,
-    )
     angle = np.arctan2((lat - s_lat) * 69, (lon - s_lon) * 53)
 
     is_major = v_max >= 96
