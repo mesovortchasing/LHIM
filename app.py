@@ -1303,33 +1303,6 @@ radar_coords = RADAR_SITES[st.session_state.active_radar]
 # -----------------------------
 col1, col2 = st.columns([0.9, 0.1])
 
-with col1:
-    st.subheader("🗺️ Live Storm Map")
-
-    # -----------------------------
-    # BUILD MAP (THIS WAS MISSING)
-    # -----------------------------
-    if basemap_mode == "Dark":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
-        if enable_dark:
-            folium.TileLayer("CartoDB dark_matter").add_to(m)
-
-    elif basemap_mode == "Street":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
-        if enable_street:
-            folium.TileLayer("OpenStreetMap").add_to(m)
-
-    elif basemap_mode == "Satellite":
-        m = folium.Map(location=[30.75, -88.12], zoom_start=9, tiles=None)
-        if enable_satellite:
-            folium.TileLayer(
-                tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-                attr="Satellite"
-            ).add_to(m)
-
-    # Optional traffic layer
-    if enable_traffic and traffic_tile_url:
-        folium.TileLayer(traffic_tile_url, name="Traffic").add_to(m)
 
     # -----------------------------
     # RENDER MAP + GET CLICK DATA
