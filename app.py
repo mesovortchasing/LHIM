@@ -1182,6 +1182,27 @@ with st.sidebar:
 
 col1, col2 = st.columns([0.9, 0.1])
 
+    st.subheader("📡 Radar Controls")
+    st.session_state.active_radar = st.selectbox(
+        "Radar Site",
+        list(RADAR_SITES.keys()),
+        index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
+    )
+    run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
+    st.session_state.is_playing = run_loop
+    current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
+    st.session_state.loop_idx = current_time_offset
+
+
+    st.subheader("🌀 Storm Structure")
+    v_max = st.slider("Intensity (kts)", 40, 160, 115)
+    r_max = st.slider("RMW (miles)", 10, 60, 25)
+    f_speed = st.slider("Forward Speed", 2, 40, 12)
+    f_dir = st.slider("Heading", 0, 360, 330)
+    l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
+    l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
+    res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
+
 with col2:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
@@ -1226,17 +1247,6 @@ if st.session_state.inspector_mode:
         show_forecast_track = st.checkbox("Show Forecast Track", value=True)
         show_cone = st.checkbox("Show Cone of Uncertainty", value=True)
 
-    st.subheader("📡 Radar Controls")
-    st.session_state.active_radar = st.selectbox(
-        "Radar Site",
-        list(RADAR_SITES.keys()),
-        index=list(RADAR_SITES.keys()).index(st.session_state.active_radar)
-    )
-    run_loop = st.checkbox("🔄 Enable Radar Loop", value=st.session_state.is_playing)
-    st.session_state.is_playing = run_loop
-    current_time_offset = st.slider("Time Offset (Hours)", -12, 12, st.session_state.loop_idx)
-    st.session_state.loop_idx = current_time_offset
-
     with st.expander("🌡️ Environmental Layers", expanded=True):
         season_month = st.selectbox("Seasonal SST Month", ["June", "July", "August", "September", "October", "November"], index=3)
         sst_boost = st.toggle("Warm Sea Surface (SST+)", value=True)
@@ -1250,15 +1260,6 @@ if st.session_state.inspector_mode:
         dry_air = st.slider("Dry Air Entrapment", 0, 40, 8)
         urban_heat = st.slider("Urban Heat Bias", 0.0, 4.0, 1.2, 0.1)
         ewr_phase = st.slider("Eyewall Cycle Phase", 0.0, 1.0, 0.0, 0.05)
-
-    st.subheader("🌀 Storm Structure")
-    v_max = st.slider("Intensity (kts)", 40, 160, 115)
-    r_max = st.slider("RMW (miles)", 10, 60, 25)
-    f_speed = st.slider("Forward Speed", 2, 40, 12)
-    f_dir = st.slider("Heading", 0, 360, 330)
-    l_lat = st.number_input("Landfall Lat", value=30.35, format="%.4f")
-    l_lon = st.number_input("Landfall Lon", value=-88.15, format="%.4f")
-    res_steps = st.select_slider("Quality", options=[30, 45, 60], value=45)
 
     st.subheader("📍 Mobile County Selector")
     selected_zone = st.selectbox("Zone", list(ZONES.keys()), index=list(ZONES.keys()).index("Downtown-Mobile"))
