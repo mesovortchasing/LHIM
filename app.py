@@ -1550,7 +1550,6 @@ with c1:
                 "Terrain Friction": f"{landfall_zone_meta['terrain_friction']:.2f}",
                 "Urban Factor": f"{landfall_zone_meta['urban_factor']:.2f}",
             }]), hide_index=True, use_container_width=True)
-
 # -----------------------------
 # CLICK LOCATION (RESTORE)
 # -----------------------------
@@ -1581,7 +1580,6 @@ env = compute_local_environment(
     ewr_phase=ewr_phase,
 )
 
-    
     k1, k2 = st.columns(2)
     k1.metric("TEMP", f"{env['temp_f']:.0f}°F")
     k1.metric("DEW PT", f"{env['dewp_f']:.0f}°F")
