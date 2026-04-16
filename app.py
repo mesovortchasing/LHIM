@@ -1397,7 +1397,6 @@ p = [
 
 radar_coords = RADAR_SITES[st.session_state.active_radar]
 
-
 # -----------------------------
 # TOP BAR
 # -----------------------------
@@ -1430,14 +1429,8 @@ if (
     or landfall_env["wind_mph"] >= (extreme_wind_threshold_mph - 15)
 ):
     warning_polygon = build_extreme_wind_warning_polygon(
-        l_lat,
-        l_lon,
-        f_dir,
-        f_speed,
-        r_max,
-        v_max,
-        symmetry,
-        shear_mag,
+        l_lat, l_lon, f_dir, f_speed,
+        r_max, v_max, symmetry, shear_mag,
         landfall_zone_meta["terrain_friction"],
         landfall_zone_meta["urban_factor"],
     )
@@ -1446,39 +1439,36 @@ if (
 
     example_warning_text = generate_extreme_wind_warning_text(
         warning_polygon,
-        l_lat,
-        l_lon,
-        current_lat,
-        current_lon,
-        f_dir,
-        f_speed,
+        l_lat, l_lon,
+        current_lat, current_lon,
+        f_dir, f_speed,
         v_max,
         landfall_env["wind_mph"],
         landfall_env["gust_mph"],
         warning_places,
     )
-# -----------------------------
-# -----------------------------
-# MAP + PANEL (STABLE FINAL)
-# -----------------------------
-    m = folium.Map(
-        location=[30.5, -88.5],  # center on Mobile area
-        zoom_start=7,
-        min_zoom=6,
-        max_zoom=10,
-        max_bounds=True,
-    )
 
-    bounds = [
-        [28.0, -91.5],  # Southwest (off Louisiana coast)
-        [32.5, -84.5],  # Northeast (AL / FL inland)
-    ]
+# -----------------------------
+# MAP (FIXED — ALWAYS RUNS)
+# -----------------------------
+m = folium.Map(
+    location=[30.5, -88.5],
+    zoom_start=7,
+    min_zoom=6,
+    max_zoom=10,
+    max_bounds=True,
+)
 
-    m.fit_bounds(bounds)
-    m.options["maxBounds"] = bounds
-    m.options["maxBoundsViscosity"] = 1.0
+bounds = [
+    [28.0, -91.5],
+    [32.5, -84.5],
+]
 
-    folium.TileLayer("CartoDB dark_matter").add_to(m)
+m.fit_bounds(bounds)
+m.options["maxBounds"] = bounds
+m.options["maxBoundsViscosity"] = 1.0
+
+folium.TileLayer("CartoDB dark_matter").add_to(m)
 
 # -----------------------------
 # RADAR GRID
@@ -1535,25 +1525,10 @@ folium.Marker(
 ).add_to(m)
 
 # -----------------------------
-# EXTREME WIND WARNING POLYGON
-# -----------------------------
-if show_extreme_wind_warning and warning_polygon is not None and len(warning_polygon) > 2:
-    if poly and len(poly) >= 3:
-        folium.Polygon(
-            locations=poly,
-            color="red",
-            fill=True,
-            fill_opacity=extreme_opacity,
-            weight=2
-        ).add_to(m)
-
-# -----------------------------
-# CONE OF UNCERTAINTY (REAL)
+# CONE
 # -----------------------------
 if show_cone and forecast_track:
     cone_coords = []
-
-    v_max, r_max, f_speed, f_dir, shear_mag, shear_dir, rh, outflow, symmetry, sst_mult = p
 
     for pt in forecast_track:
         radius_mi = forecast_cone_radius_mi(pt["hour"], r_max)
@@ -1569,55 +1544,32 @@ if show_cone and forecast_track:
         color="white",
         weight=2,
         fill=True,
-        fill_opacity=0.08,
-        tooltip="Cone of Uncertainty"
+        fill_opacity=0.08
     ).add_to(m)
 
 # -----------------------------
-# CLICK / INSPECTOR STATE
+# WARNINGS (FIXED)
 # -----------------------------
-if "last_click" not in st.session_state:
-    st.session_state.last_click = (current_lat, current_lon)
-
-inspect_lat, inspect_lon = st.session_state.last_click
-
-if st.session_state.inspector_mode:
-    folium.Marker(
-        [inspect_lat, inspect_lon],
-        icon=folium.Icon(color="white", icon="plus"),
-    ).add_to(m)
-
-
-def distance_miles(lat1, lon1, lat2, lon2):
-    return np.hypot((lat1 - lat2) * 69, (lon1 - lon2) * 53)
-
-
-wind_mph = kt_to_mph(v_max)
-gust_mph = wind_mph * 1.2
-
-dist_to_landfall = distance_miles(current_lat, current_lon, l_lat, l_lon)
+dist_to_landfall = np.hypot((current_lat - l_lat) * 69, (current_lon - l_lon) * 53)
 warnings_active = dist_to_landfall <= warning_distance_trigger
 
-
-if show_extreme_wind_warning and warnings_active and kt_to_mph(v_max) >= extreme_wind_threshold_mph:
+if show_extreme_wind_warning and warnings_active:
     poly = build_extreme_wind_warning_polygon(
         current_lat, current_lon, f_dir, f_speed,
         r_max, v_max, symmetry, shear_mag,
-        zone_meta["terrain_friction"], urban_heat
+        landfall_zone_meta["terrain_friction"], urban_heat
     )
-
-    folium.Polygon(
-        locations=poly,
-        color="red",
-        fill=True,
-        fill_opacity=extreme_opacity,
-        weight=2
-    ).add_to(m)
-
+    if poly and len(poly) >= 3:
+        folium.Polygon(
+            locations=poly,
+            color="red",
+            fill=True,
+            fill_opacity=extreme_opacity,
+            weight=2
+        ).add_to(m)
 
 if show_hurricane_warning and warnings_active:
     poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
-
     if poly and len(poly) >= 3:
         folium.Polygon(
             locations=poly,
@@ -1627,10 +1579,8 @@ if show_hurricane_warning and warnings_active:
             weight=2
         ).add_to(m)
 
-
 if show_surge_warning and warnings_active:
     poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
-
     if poly and len(poly) >= 3:
         folium.Polygon(
             locations=poly,
@@ -1640,9 +1590,8 @@ if show_surge_warning and warnings_active:
             weight=2
         ).add_to(m)
 
-
 # -----------------------------
-# RENDER MAP (STABLE KEY)
+# RENDER MAP
 # -----------------------------
 map_data = st_folium(
     m,
@@ -1652,44 +1601,29 @@ map_data = st_folium(
     returned_objects=["last_clicked"]
 )
 
+# -----------------------------
+# WARNING PANEL (UNDER MAP ✅)
+# -----------------------------
 st.subheader("⚠️ Warning Panel")
 
 if show_warning_text_panel and warnings_active:
-    active_polygon = None
+    selected_places = pick_impacted_places(poly, CITY_POINTS)
+    warning_text = generate_extreme_wind_warning_text(
+        poly,
+        l_lat, l_lon,
+        current_lat, current_lon,
+        f_dir, f_speed,
+        v_max,
+        kt_to_mph(v_max),
+        kt_to_mph(v_max) * 1.2,
+        selected_places
+    )
 
-    if show_extreme_wind_warning:
-        active_polygon = build_extreme_wind_warning_polygon(
-            current_lat, current_lon, f_dir, f_speed,
-            r_max, v_max, symmetry, shear_mag,
-            terrain_friction=0.5,
-            urban_factor=urban_heat
-        )
+    st.text_area("Warning Text", warning_text, height=400)
 
-    elif show_hurricane_warning:
-        active_polygon = build_hurricane_warning_polygon(
-            current_lat, current_lon, r_max
-        )
-
-    elif show_surge_warning:
-        active_polygon = build_surge_polygon(
-            current_lat, current_lon, f_dir, r_max
-        )
-
-    if active_polygon:
-        selected_places = pick_impacted_places(active_polygon, CITY_POINTS)
-
-        warning_text = generate_extreme_wind_warning_text(
-            active_polygon,
-            l_lat, l_lon,
-            current_lat, current_lon,
-            f_dir, f_speed,
-            v_max, wind_mph, gust_mph,
-            selected_places
-        )
-
-        st.text_area("Warning Text", warning_text, height=400)
-
-
+# -----------------------------
+# CLICK UPDATE
+# -----------------------------
 if map_data and map_data.get("last_clicked"):
     st.session_state.last_click = (
         map_data["last_clicked"]["lat"],
