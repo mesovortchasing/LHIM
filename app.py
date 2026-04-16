@@ -1629,32 +1629,19 @@ with c1:
         returned_objects=["last_clicked"],
     )
 
-if st.session_state.inspector_mode:
-
-    dbz, vel, surge, prob, beam = get_synthetic_products(
-        center_lat,
-        center_lon,
-        s_lat,
-        s_lon,
-        p,
-        radar_coords=radar_coords
-    )
-
-    vel_mph = vel * 1.15078
-
 if map_data and "center" in map_data:
     center_lat = map_data["center"]["lat"]
     center_lon = map_data["center"]["lng"]
 else:
-    center_lat, center_lon = s_lat, s_lon
+    center_lat, center_lon = current_lat, current_lon
 
 if st.session_state.inspector_mode:
 
     dbz, vel, surge, prob, beam = get_synthetic_products(
         center_lat,
         center_lon,
-        s_lat,
-        s_lon,
+        current_lat,
+        current_lon,
         p,
         radar_coords=radar_coords
     )
