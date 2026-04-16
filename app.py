@@ -192,11 +192,11 @@ def get_synthetic_products(
     cone_of_silence=True,
 ):
     v_max, r_max, _, _, shear_mag, shear_dir, rh, _, symmetry, _ = p
-    w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, v_max, r_max, motion_dir, motion_speed, shear, terrain, inland_decay)
+w, wd, r = calculate_full_physics(lat, lon, s_lat, s_lon, p, v_max, r_max, motion_dir, motion_speed, shear, terrain, inland_decay)
 
-        # --- NEW: approximate central pressure safely ---
-    base_mslp = calculate_mslp(v_max, 0)
-    p_center = calculate_mslp(v_max, 1012 - base_mslp)
+# --- NEW: approximate central pressure safely ---
+base_mslp = calculate_mslp(v_max, 0)
+p_center = calculate_mslp(v_max, 1012 - base_mslp)
 
 p_neighbors = [
     p_center * (1 + np.random.uniform(-0.01, 0.01)),
