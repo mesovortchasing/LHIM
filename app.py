@@ -1612,6 +1612,120 @@ wind_mph = kt_to_mph(v_max)
 gust_mph = wind_mph * 1.2
 
 # -----------------------------
+# CORE STORM METRICS (FOUNDATION)
+# -----------------------------
+wind_mph = kt_to_mph(v_max)
+gust_mph = wind_mph * 1.2
+
+# Forward speed conversion
+f_speed_mph = kt_to_mph(f_speed)
+
+# -----------------------------
+# SURGE MODEL (simple but realistic scaling)
+# -----------------------------
+surge_ft = round(
+    (wind_mph / 15) + (f_speed_mph * 0.2) + (r_max * 0.05),
+    1
+)
+surge_ft = max(1, surge_ft)
+
+# -----------------------------
+# RAINFALL MODEL
+# -----------------------------
+rainfall_in = round(
+    (rh / 8) + (f_speed_mph * 0.25) + ((1 - symmetry) * 6),
+    1
+)
+
+# -----------------------------
+# TORNADO ENVIRONMENT (IMPORTANT FOR NEXT STEP)
+# -----------------------------
+# Simulated SRH (Storm Relative Helicity)
+srh = (shear_mag * 2.2) + (f_speed * 3)
+
+# Low-level shear proxy
+low_level_shear = shear_mag * (1 + (1 - symmetry))
+
+# Instability proxy
+instability = rh * 0.6
+
+# Tornado potential score (THIS drives tornado warnings later)
+tornado_score = (
+    (srh * 0.4) +
+    (low_level_shear * 0.3) +
+    (instability * 0.3)
+)
+
+# Categorize tornado risk
+if tornado_score >= 140:
+    tornado_risk = "HIGH"
+elif tornado_score >= 90:
+    tornado_risk = "MODERATE"
+elif tornado_score >= 60:
+    tornado_risk = "LOW"
+else:
+    tornado_risk = "MINIMAL"
+
+# -----------------------------
+# WARNING STORAGE (NEW)
+# -----------------------------
+warning_data = {
+    "EXTREME WIND": [],
+    "HURRICANE": [],
+    "STORM SURGE": [],
+    "TORNADO": []
+}
+
+st.write({
+    "wind": wind_mph,
+    "gust": gust_mph,
+    "surge": surge_ft,
+    "rain": rainfall_in,
+    "srh": srh,
+    "tornado_score": tornado_score,
+    "risk": tornado_risk
+})
+
+import random
+
+def generate_tornadoes(current_lat, current_lon, f_dir, tornado_score):
+    tornadoes = []
+
+    # How many tornadoes?
+    if tornado_score >= 140:
+        count = random.randint(3, 6)
+    elif tornado_score >= 100:
+        count = random.randint(2, 4)
+    elif tornado_score >= 70:
+        count = random.randint(1, 2)
+    else:
+        count = 0
+
+    for _ in range(count):
+        # Place in right-front quadrant (most realistic)
+        angle_offset = random.uniform(-40, 60)
+        distance = random.uniform(10, 60) / 69.0
+
+        lat = current_lat + distance * np.cos(np.radians(f_dir + angle_offset))
+        lon = current_lon + distance * np.sin(np.radians(f_dir + angle_offset))
+
+        # Tornado intensity proxy
+        ef_scale = random.choices(
+            ["EF0", "EF1", "EF2", "EF3"],
+            weights=[40, 35, 20, 5]
+        )[0]
+
+        tornadoes.append({
+            "lat": lat,
+            "lon": lon,
+            "ef": ef_scale
+        })
+
+    return tornadoes
+
+tornadoes = generate_tornadoes(current_lat, current_lon, f_dir, tornado_score)
+
+# -----------------------------
 # WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
 from shapely.geometry import Polygon, shape
@@ -1622,6 +1736,49 @@ warnings_active = dist_to_landfall <= warning_distance_trigger
 impacted_counties = []
 county_warning_texts = {}
 warning_shape = None
+
+from shapely.geometry import Point
+
+tornado_warning_polygons = []
+tornado_warning_texts = []
+
+for tor in tornadoes:
+    tor_point = Point(tor["lon"], tor["lat"])
+
+    for feature in counties_geo["features"]:
+        county_geom = shape(feature["geometry"])
+
+        if county_geom.contains(tor_point):
+            name = feature["properties"].get("NAME", "Unknown")
+
+            # Build small polygon around tornado
+            radius = 0.15  # ~10 miles
+            poly = [
+                (tor["lat"] + radius, tor["lon"]),
+                (tor["lat"], tor["lon"] + radius),
+                (tor["lat"] - radius, tor["lon"]),
+                (tor["lat"], tor["lon"] - radius),
+            ]
+
+            folium.Polygon(
+                locations=poly,
+                color="yellow",
+                fill=True,
+                fill_opacity=0.5,
+                weight=2,
+                tooltip=f"Tornado Warning: {name} County ({tor['ef']})"
+            ).add_to(m)
+
+            tornado_warning_polygons.append(poly)
+
+            tornado_warning_texts.append(
+                f"TORNADO WARNING FOR {name.upper()} COUNTY\n"
+                f"Radar indicated rotation. Possible {tor['ef']} tornado.\n"
+                f"TAKE COVER NOW."
+            )
+
+warnings_by_category["Tornado"] = tornado_warning_texts.copy()
+
 
 # -----------------------------
 # EXTREME WIND WARNING
@@ -1667,6 +1824,8 @@ if show_extreme_wind_warning and warnings_active:
                         "fillOpacity": 0.4,
                     },
                 ).add_to(m)
+
+warnings_by_category["Extreme Wind"] = impacted_counties.copy()
 
 # -----------------------------
 # BUILD OVERLAY TEXT
@@ -1754,6 +1913,16 @@ if overlay_text:
         )
     ).add_to(m)
 
+warnings_by_category = {
+    "Extreme Wind": [],
+    "Hurricane": [],
+    "Storm Surge": [],
+    "Tornado": []
+}
+
+warnings_by_category["Hurricane"] = impacted_counties.copy()
+warnings_by_category["Storm Surge"] = impacted_counties.copy()
+
 # -----------------------------
 # RENDER MAP
 # -----------------------------
@@ -1766,31 +1935,7 @@ map_data = st_folium(
     returned_objects=["last_clicked"]
 )
 
-# -----------------------------
-# WARNING PANEL (UNDER MAP ✅)
-# -----------------------------
-st.subheader("⚠️ Warning Panel")
-
-if show_warning_text_panel and warnings_active:
-    if poly and len(poly) >= 5:
-        selected_places = impacted_counties[:6]
-
-        warning_text = generate_extreme_wind_warning_text(
-            poly,
-            l_lat, l_lon,
-            current_lat, current_lon,
-            f_dir, f_speed,
-            v_max,
-            kt_to_mph(v_max),
-            kt_to_mph(v_max) * 1.2,
-            selected_places
-        )
-
-        st.text_area("Warning Text", warning_text, height=400)
-    else:
-        st.warning("Polygon too small for warning text")
-
-# -----------------------------
+#-------------------------------
 # CLICK UPDATE
 # -----------------------------
 if map_data and map_data.get("last_clicked"):
