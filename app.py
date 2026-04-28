@@ -1826,6 +1826,8 @@ if warnings_active and tornado_chance > 0.25:
             "strength": strength
         })
 
+st.write("🌪 vortices generated:", len(tornado_vortices))
+
 impacted_counties = []
 county_warning_texts = {}
 warning_shape = None
