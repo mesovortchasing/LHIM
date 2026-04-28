@@ -1640,17 +1640,18 @@ if show_extreme_wind_warning and warnings_active:
             county_geom = shape(feature["geometry"])
 
             if warning_shape.contains(county_geom.centroid):
-    name = feature["properties"].get("NAME", "Unknown")
+                name = feature["properties"].get("NAME", "Unknown")
 
-    impacted_counties.append(f"{name} County")
+                impacted_counties.append(f"{name} County")
 
-    county_warning_texts[name] = generate_county_warning_text(
-        name,
-        "EXTREME WIND",  # you can make dynamic later
-        wind_mph,
-        gust_mph
-    )
-                # DRAW COUNTY (THIS REPLACES POLYGON)
+                county_warning_texts[name] = generate_county_warning_text(
+                    name,
+                    "EXTREME WIND",
+                    wind_mph,
+                    gust_mph
+                )
+
+                # DRAW COUNTY
                 folium.GeoJson(
                     feature,
                     style_function=lambda x: {
@@ -1660,8 +1661,14 @@ if show_extreme_wind_warning and warnings_active:
                         "fillOpacity": 0.4,
                     },
                 ).add_to(m)
-    
+
+# -----------------------------
+# BUILD OVERLAY TEXT
+# -----------------------------
 overlay_text = ""
+
+for county, text in county_warning_texts.items():
+    overlay_text += f"\n--- {county} County ---\n{text}\n"
 
 for county, text in county_warning_texts.items():
     overlay_text += f"\n--- {county} County ---\n{text}\n"
