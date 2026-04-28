@@ -1834,7 +1834,86 @@ if show_extreme_wind_warning and warnings_active:
                     },
                 ).add_to(m)
 
-warnings_by_category["Extreme Wind"] = impacted_counties.copy()
+warnings_by_category["Extreme Wind"] = county_warning_texts.copy()
+
+# -----------------------------
+# HURRICANE WARNING
+# -----------------------------
+hurricane_warning_texts = {}
+
+if show_hurricane_warning and warnings_active:
+
+    poly = build_hurricane_warning_polygon(current_lat, current_lon, r_max)
+
+    if poly and len(poly) >= 3:
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+    if warning_shape:
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+                name = feature["properties"].get("NAME", "Unknown")
+
+                hurricane_warning_texts[name] = generate_county_warning_text(
+                    name,
+                    "HURRICANE",
+                    wind_mph,
+                    gust_mph
+                )
+
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda x: {
+                        "fillColor": "orange",
+                        "color": "orange",
+                        "weight": 1,
+                        "fillOpacity": 0.35,
+                    },
+                ).add_to(m)
+
+# 🔥 ADD THIS LINE (OUTSIDE THE LOOP)
+warnings_by_category["Hurricane"] = hurricane_warning_texts.copy()
+
+
+# -----------------------------
+# STORM SURGE WARNING
+# -----------------------------
+surge_warning_texts = {}
+
+if show_surge_warning and warnings_active:
+
+    poly = build_surge_polygon(current_lat, current_lon, f_dir, r_max)
+
+    if poly and len(poly) >= 3:
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+    if warning_shape:
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+                name = feature["properties"].get("NAME", "Unknown")
+
+                surge_warning_texts[name] = generate_county_warning_text(
+                    name,
+                    "STORM SURGE",
+                    wind_mph,
+                    gust_mph
+                )
+
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda x: {
+                        "fillColor": "purple",
+                        "color": "purple",
+                        "weight": 1,
+                        "fillOpacity": 0.35,
+                    },
+                ).add_to(m)
+
+# 🔥 REQUIRED
+warnings_by_category["Storm Surge"] = surge_warning_texts.copy()
 
 # -----------------------------
 # BUILD OVERLAY TEXT
