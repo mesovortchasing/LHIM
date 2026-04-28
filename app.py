@@ -17,6 +17,8 @@ import json
 with open("counties.geojson") as f:
     counties_geo = json.load(f)
     st.write("County count:", len(counties_geo["features"]))
+
+st.write("Counties loaded:", len(counties_geo["features"]))
     
 # =========================================================
 # LHIM MOBILE COUNTY v4.0 HYPERREALISTIC
