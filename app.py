@@ -1768,6 +1768,12 @@ def generate_tornado_vortexes(current_lat, current_lon, f_dir, count, spread=1.2
 # WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
 
+impacted_counties = []
+county_warning_texts = {}
+warnings_by_category = {}
+tornado_warning_texts = {}
+tornado_vortices = []
+
 warnings_by_category = {
     "Extreme Wind": {},
     "Hurricane": {},
