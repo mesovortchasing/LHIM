@@ -1728,6 +1728,14 @@ tornadoes = generate_tornadoes(current_lat, current_lon, f_dir, tornado_score)
 # -----------------------------
 # WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
+
+warnings_by_category = {
+    "Extreme Wind": {},
+    "Hurricane": {},
+    "Storm Surge": {},
+    "Tornado": {}
+}
+
 from shapely.geometry import Polygon, shape
 
 dist_to_landfall = np.hypot((current_lat - l_lat) * 69, (current_lon - l_lon) * 53)
@@ -1736,6 +1744,7 @@ warnings_active = dist_to_landfall <= warning_distance_trigger
 impacted_counties = []
 county_warning_texts = {}
 warning_shape = None
+
 
 from shapely.geometry import Point
 
@@ -1912,13 +1921,6 @@ if overlay_text:
             """
         )
     ).add_to(m)
-
-warnings_by_category = {
-    "Extreme Wind": [],
-    "Hurricane": [],
-    "Storm Surge": [],
-    "Tornado": []
-}
 
 warnings_by_category["Hurricane"] = impacted_counties.copy()
 warnings_by_category["Storm Surge"] = impacted_counties.copy()
