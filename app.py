@@ -7,6 +7,7 @@ from folium.plugins import Fullscreen
 from streamlit_folium import st_folium
 import time
 from geopy.geocoders import Nominatim
+from shapely.geometry import Point
 
 st.set_page_config(layout="wide")
 
@@ -1776,8 +1777,48 @@ warnings_by_category = {
 
 from shapely.geometry import Polygon, shape
 
+# Initialize tornado system
+tornado_vortices = []
+tornado_warning_texts = {}
+
 dist_to_landfall = np.hypot((current_lat - l_lat) * 69, (current_lon - l_lon) * 53)
 warnings_active = dist_to_landfall <= warning_distance_trigger
+
+if county_warning_texts:
+    warnings_by_category["Tornado"] = county_warning_texts.copy()
+
+# -----------------------------
+# TORNADO GENESIS (BANDS)
+# -----------------------------
+import random
+
+# Basic environment triggers (you can refine later)
+shear_factor = shear_mag / 40.0
+speed_factor = f_speed / 20.0
+instability = shear_factor * speed_factor
+
+tornado_chance = min(0.6, instability)
+
+if warnings_active and tornado_chance > 0.25:
+
+    num_vortices = random.randint(1, 4)
+
+    for _ in range(num_vortices):
+
+        # Place vortices in outer bands (not center)
+        angle = np.radians(f_dir + random.uniform(-60, 60))
+        radius = random.uniform(0.5, 2.0) * (r_max / 69.0)
+
+        lat = current_lat + radius * np.cos(angle)
+        lon = current_lon + radius * np.sin(angle)
+
+        strength = random.uniform(0.3, 1.0) * instability
+
+        tornado_vortices.append({
+            "lat": lat,
+            "lon": lon,
+            "strength": strength
+        })
 
 impacted_counties = []
 county_warning_texts = {}
@@ -1873,6 +1914,34 @@ if show_extreme_wind_warning and warnings_active:
                 ).add_to(m)
 
 warnings_by_category["Extreme Wind"] = county_warning_texts.copy()
+
+# -----------------------------
+# TORNADO WARNING CHECK
+# -----------------------------
+for v in tornado_vortices:
+
+    vortex_point = Point(v["lon"], v["lat"])
+
+    if county_geom.contains(vortex_point) and v["strength"] > 0.4:
+
+        name = feature["properties"].get("NAME", "Unknown")
+
+        county_warning_texts[name] = generate_county_warning_text(
+            name,
+            "TORNADO",
+            wind_mph,
+            gust_mph
+        )
+
+        folium.GeoJson(
+            feature,
+            style_function=lambda x: {
+                "fillColor": "yellow",
+                "color": "yellow",
+                "weight": 1,
+                "fillOpacity": 0.5,
+            },
+        ).add_to(m)
 
 # -----------------------------
 # HURRICANE WARNING
@@ -2021,15 +2090,25 @@ Take cover immediately.
 
 warnings_by_category["Tornado"] = tornado_warning_texts.copy()
 
-# Velocity couplet marker
-folium.CircleMarker(
-    [v[0], v[1]],
-    radius=6,
-    color="cyan",
-    fill=True,
-    fill_opacity=0.9,
-    tooltip="Velocity Couplet"
-).add_to(m)
+# -----------------------------
+# TORNADO VORTEX MARKERS
+# -----------------------------
+if "tornado_vortices" in locals() and tornado_vortices:
+
+    for v in tornado_vortices:
+
+        # Handle BOTH formats safely
+        if isinstance(v, dict):
+            lat, lon = v["lat"], v["lon"]
+        else:
+            lat, lon = v  # tuple fallback
+
+        folium.Marker(
+            [lat, lon],
+            icon=folium.Icon(color="yellow", icon="bolt"),
+            tooltip="Tornado Vortex"
+        ).add_to(m)
+
 
 # -----------------------------
 # BUILD OVERLAY TEXT
@@ -2120,6 +2199,23 @@ if overlay_text:
 warnings_by_category["Hurricane"] = impacted_counties.copy()
 warnings_by_category["Storm Surge"] = impacted_counties.copy()
 
+# -----------------------------
+# TORNADO VORTEX MARKERS
+# -----------------------------
+for v in tornado_vortices:
+
+    lat = v["lat"]
+    lon = v["lon"]
+
+    folium.CircleMarker(
+        location=[lat, lon],
+        radius=6 + v["strength"] * 6,
+        color="yellow",
+        fill=True,
+        fill_opacity=0.9,
+        tooltip=f"Tornado Vortex (Strength: {v['strength']:.2f})"
+    ).add_to(m)
+    
 # -----------------------------
 # RENDER MAP
 # -----------------------------
