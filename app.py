@@ -1453,6 +1453,15 @@ p = [
     symmetry, get_sst_mult(season_month, sst_boost),
 ]
 
+# -----------------------------
+# SEVERE WEATHER PARAMETERS ✅ (STEP 4 GOES HERE)
+# -----------------------------
+srh = max(0, shear_mag * 3.5)
+bulk_shear = shear_mag
+instability = max(0, (v_max / 10) * 2)
+
+tornado_prob = min(1.0, (srh / 300) * (bulk_shear / 40))
+
 radar_coords = RADAR_SITES[st.session_state.active_radar]
 
 # -----------------------------
@@ -1462,6 +1471,15 @@ col_top_left, col_top_right = st.columns([0.92, 0.08])
 with col_top_right:
     if st.button("🔍" if not st.session_state.inspector_mode else "❌"):
         st.session_state.inspector_mode = not st.session_state.inspector_mode
+
+# -----------------------------
+# WARNING CONSOLE TOGGLE
+# -----------------------------
+if "show_warning_console" not in st.session_state:
+    st.session_state.show_warning_console = False
+
+if st.button("⚠️ WARNINGS"):
+    st.session_state.show_warning_console = not st.session_state.show_warning_console
 
 mslp = calculate_mslp(v_max, pressure_drop_hpa)
 pressure_tendency = calculate_pressure_tendency_mbhr(pressure_drop_hpa)
@@ -1725,6 +1743,26 @@ def generate_tornadoes(current_lat, current_lon, f_dir, tornado_score):
 
 tornadoes = generate_tornadoes(current_lat, current_lon, f_dir, tornado_score)
 
+def generate_tornado_vortexes(current_lat, current_lon, f_dir, count, spread=1.2):
+    vortexes = []
+
+    for i in range(count):
+        angle_offset = np.random.uniform(-60, 60)
+        dist = np.random.uniform(0.2, spread)
+
+        lat = current_lat + dist * np.cos(np.radians(f_dir + angle_offset))
+        lon = current_lon + dist * np.sin(np.radians(f_dir + angle_offset))
+
+        strength = np.random.uniform(0.5, 1.0)
+
+        vortexes.append({
+            "lat": lat,
+            "lon": lon,
+            "strength": strength
+        })
+
+    return vortexes
+
 # -----------------------------
 # WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
@@ -1916,6 +1954,73 @@ if show_surge_warning and warnings_active:
 warnings_by_category["Storm Surge"] = surge_warning_texts.copy()
 
 # -----------------------------
+# TORNADO WARNINGS
+# -----------------------------
+tornado_warning_texts = {}
+
+vortexes = []
+
+if tornado_prob > 0.25 and warnings_active:
+
+    vortex_count = int(tornado_prob * 6)
+
+    vortexes = generate_tornado_vortexes(
+        current_lat, current_lon, f_dir, vortex_count
+    )
+
+    for v in vortexes:
+
+        # Build small rotating polygon
+        poly = []
+        radius = 0.08 * v["strength"]
+
+        for angle in np.linspace(0, 360, 10):
+            lat = v["lat"] + radius * np.cos(np.radians(angle))
+            lon = v["lon"] + radius * np.sin(np.radians(angle))
+            poly.append((lat, lon))
+
+        warning_shape = Polygon([(lon, lat) for lat, lon in poly])
+
+        for feature in counties_geo["features"]:
+            county_geom = shape(feature["geometry"])
+
+            if warning_shape.contains(county_geom.centroid):
+
+                name = feature["properties"].get("NAME", "Unknown")
+
+                tornado_warning_texts[name] = f"""
+TORNADO WARNING
+
+Radar indicates rotation capable of producing a tornado.
+
+Winds: {int(wind_mph)} mph
+Gusts: {int(gust_mph)} mph
+
+Take cover immediately.
+"""
+
+                # DRAW polygon
+                folium.Polygon(
+                    locations=poly,
+                    color="#00e0ff",
+                    fill=True,
+                    fill_opacity=0.35,
+                    weight=2
+                ).add_to(m)
+
+warnings_by_category["Tornado"] = tornado_warning_texts.copy()
+
+# Velocity couplet marker
+folium.CircleMarker(
+    [v["lat"], v["lon"]],
+    radius=6,
+    color="cyan",
+    fill=True,
+    fill_opacity=0.9,
+    tooltip="Velocity Couplet"
+).add_to(m)
+
+# -----------------------------
 # BUILD OVERLAY TEXT
 # -----------------------------
 overlay_text = ""
@@ -2015,6 +2120,72 @@ map_data = st_folium(
     key="main_map",
     returned_objects=["last_clicked"]
 )
+
+# -----------------------------
+# FLOATING WARNING CONSOLE
+# -----------------------------
+if st.session_state.show_warning_console:
+
+    console_html = """
+    <div style="
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        width: 360px;
+        max-height: 650px;
+        overflow-y: auto;
+        background: rgba(10,12,18,0.96);
+        border-radius: 14px;
+        padding: 14px;
+        z-index: 9999;
+        box-shadow: 0 0 25px rgba(0,0,0,0.7);
+        font-family: monospace;
+        font-size: 12px;
+        color: #e6edf3;
+    ">
+    <b style="font-size:15px;">⚠️ ACTIVE WARNINGS</b><br><br>
+    """
+
+    colors = {
+        "Extreme Wind": "#ff3b3b",
+        "Hurricane": "#ff9a00",
+        "Storm Surge": "#b266ff",
+        "Tornado": "#00e0ff"
+    }
+
+    for category, counties in warnings_by_category.items():
+
+        if not counties:
+            continue
+
+        color = colors.get(category, "#ffffff")
+
+        console_html += f"""
+        <div style="margin-bottom:12px;">
+            <b style="color:{color}; font-size:13px;">{category}</b>
+        """
+
+        for county, text in counties.items():
+            console_html += f"""
+            <div style="
+                margin-top:6px;
+                padding:8px;
+                background: rgba(255,255,255,0.05);
+                border-left: 3px solid {color};
+                border-radius:6px;
+            ">
+                <b>{county} County</b><br>
+                <div style="opacity:0.85; white-space:pre-wrap;">
+                    {text}
+                </div>
+            </div>
+            """
+
+        console_html += "</div>"
+
+    console_html += "</div>"
+
+    st.markdown(console_html, unsafe_allow_html=True)
 
 #-------------------------------
 # CLICK UPDATE
