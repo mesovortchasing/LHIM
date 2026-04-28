@@ -1299,6 +1299,44 @@ $$
 """
     return text
 
+
+def generate_county_warning_text(county_name, warning_type, wind_mph, gust_mph):
+    """
+    Generates localized, NWS-style text per county
+    """
+
+    if warning_type == "EXTREME WIND" if gust_mph >= 115 else "HURRICANE":
+        headline = f"Extreme Wind Warning for {county_name} County"
+        impacts = (
+            "Destructive winds will cause extensive structural damage. "
+            "Numerous trees and power lines will be downed. "
+            "Travel will be impossible and life-threatening."
+        )
+    elif warning_type == "HURRICANE":
+        headline = f"Hurricane Warning for {county_name} County"
+        impacts = (
+            "Hurricane conditions are expected. "
+            "Widespread power outages and structural damage are likely."
+        )
+    else:
+        headline = f"Storm Surge Warning for {county_name} County"
+        impacts = (
+            "Life-threatening storm surge inundation is expected. "
+            "Low-lying areas will become uninhabitable."
+        )
+
+    return f"""
+{headline}
+
+Winds: {int(wind_mph)} mph sustained, gusts to {int(gust_mph)} mph
+
+IMPACTS:
+{impacts}
+
+ACTION:
+Take shelter immediately in an interior room away from windows.
+"""
+
 # -----------------------------
 # 5. SESSION STATE
 # -----------------------------
@@ -1576,6 +1614,7 @@ dist_to_landfall = np.hypot((current_lat - l_lat) * 69, (current_lon - l_lon) * 
 warnings_active = dist_to_landfall <= warning_distance_trigger
 
 impacted_counties = []
+county_warning_texts = {}
 warning_shape = None
 
 # -----------------------------
@@ -1601,11 +1640,16 @@ if show_extreme_wind_warning and warnings_active:
             county_geom = shape(feature["geometry"])
 
             if warning_shape.contains(county_geom.centroid):
+    name = feature["properties"].get("NAME", "Unknown")
 
-                # Save county name
-                name = feature["properties"].get("NAME", "Unknown")
-                impacted_counties.append(f"{name} County")
+    impacted_counties.append(f"{name} County")
 
+    county_warning_texts[name] = generate_county_warning_text(
+        name,
+        "EXTREME WIND",  # you can make dynamic later
+        wind_mph,
+        gust_mph
+    )
                 # DRAW COUNTY (THIS REPLACES POLYGON)
                 folium.GeoJson(
                     feature,
@@ -1616,6 +1660,11 @@ if show_extreme_wind_warning and warnings_active:
                         "fillOpacity": 0.4,
                     },
                 ).add_to(m)
+    
+overlay_text = ""
+
+for county, text in county_warning_texts.items():
+    overlay_text += f"\n--- {county} County ---\n{text}\n"
 
 # -----------------------------
 # HURRICANE WARNING (optional upgrade later)
@@ -1665,9 +1714,37 @@ if show_surge_warning and warnings_active:
                     },
                 ).add_to(m)
 
+
+if overlay_text:
+    folium.Marker(
+        location=[32.2, -86.5],  # fixed screen-ish position,
+        icon=DivIcon(
+            icon_size=(400, 300),
+            icon_anchor=(0, 0),
+            html=f"""
+            <div style="
+                width:400px;
+                height:300px;
+                overflow-y:scroll;
+                background:rgba(0,0,0,0.75);
+                color:white;
+                padding:10px;
+                border-radius:10px;
+                font-size:12px;
+                font-family:monospace;
+                box-shadow:0 0 15px rgba(255,0,0,0.4);
+            ">
+            <b>⚠️ ACTIVE WARNINGS</b><br><br>
+            {overlay_text}
+            </div>
+            """
+        )
+    ).add_to(m)
+
 # -----------------------------
 # RENDER MAP
 # -----------------------------
+
 map_data = st_folium(
     m,
     height=850,
