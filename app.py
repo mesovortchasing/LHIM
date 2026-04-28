@@ -1805,7 +1805,7 @@ instability = shear_factor * speed_factor
 
 tornado_chance = min(0.6, instability)
 
-if warnings_active and tornado_chance > 0.25:
+if True:
 
     num_vortices = random.randint(1, 4)
 
