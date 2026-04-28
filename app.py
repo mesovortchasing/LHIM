@@ -1979,6 +1979,7 @@ if tornado_prob > 0.25 and warnings_active:
             lon = v["lon"] + radius * np.sin(np.radians(angle))
             poly.append((lat, lon))
 
+        # Convert to shapely
         warning_shape = Polygon([(lon, lat) for lat, lon in poly])
 
         for feature in counties_geo["features"]:
@@ -1999,14 +2000,24 @@ Gusts: {int(gust_mph)} mph
 Take cover immediately.
 """
 
-                # DRAW polygon
-                folium.Polygon(
-                    locations=poly,
-                    color="#00e0ff",
-                    fill=True,
-                    fill_opacity=0.35,
-                    weight=2
-                ).add_to(m)
+        # ✅ DRAW POLYGON (INSIDE LOOP)
+        folium.Polygon(
+            locations=poly,
+            color="#00e0ff",
+            fill=True,
+            fill_opacity=0.35,
+            weight=2
+        ).add_to(m)
+
+        # ✅ DRAW COUPLET MARKER (INSIDE LOOP — FIXES ERROR)
+        folium.CircleMarker(
+            [v["lat"], v["lon"]],
+            radius=6,
+            color="cyan",
+            fill=True,
+            fill_opacity=0.9,
+            tooltip="Velocity Couplet"
+        ).add_to(m)
 
 warnings_by_category["Tornado"] = tornado_warning_texts.copy()
 
