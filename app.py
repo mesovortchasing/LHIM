@@ -1799,15 +1799,17 @@ if county_warning_texts:
 import random
 
 # Basic environment triggers (you can refine later)
-shear_factor = shear_mag / 40.0
-speed_factor = f_speed / 20.0
+shear_factor = shear_mag / 30.0      # more sensitive
+speed_factor = f_speed / 15.0        # faster storms = more spin
 instability = shear_factor * speed_factor
 
-tornado_chance = min(0.6, instability)
+# Base tornado probability (never zero)
+tornado_chance = min(0.8, 0.15 + instability * 0.6)
 
-if True:
+# Allow weak events too
+if warnings_active and tornado_chance > random.uniform(0.1, 0.6):
 
-    num_vortices = random.randint(1, 4)
+    num_vortices = int(1 + tornado_chance * 6)
 
     for _ in range(num_vortices):
 
