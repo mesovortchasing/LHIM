@@ -2011,7 +2011,7 @@ Take cover immediately.
 
         # ✅ DRAW COUPLET MARKER (INSIDE LOOP — FIXES ERROR)
         folium.CircleMarker(
-            [v["lat"], v["lon"]],
+            [v[0], v[1]],
             radius=6,
             color="cyan",
             fill=True,
@@ -2023,7 +2023,7 @@ warnings_by_category["Tornado"] = tornado_warning_texts.copy()
 
 # Velocity couplet marker
 folium.CircleMarker(
-    [v["lat"], v["lon"]],
+    [v[0], v[1]],
     radius=6,
     color="cyan",
     fill=True,
