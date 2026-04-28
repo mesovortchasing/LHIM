@@ -1606,6 +1606,12 @@ if show_cone and forecast_track:
     ).add_to(m)
 
 # -----------------------------
+# WIND CALCULATIONS (FIX)
+# -----------------------------
+wind_mph = kt_to_mph(v_max)
+gust_mph = wind_mph * 1.2
+
+# -----------------------------
 # WARNINGS (COUNTY-BASED ✅)
 # -----------------------------
 from shapely.geometry import Polygon, shape
